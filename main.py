@@ -51,7 +51,7 @@ async def init():
     # Initialize MongoDB connection
     await init_database()
 
-def main():
+async def main():
     """Start the bot."""
     # Create the Application
     token = os.getenv("BOT_TOKEN")
@@ -60,8 +60,7 @@ def main():
         return
         
     # Run database initialization
-    import asyncio
-    asyncio.run(init())
+    await init_database()
         
     application = Application.builder().token(token).build()
     
@@ -89,7 +88,24 @@ def main():
     application.add_handler(CallbackQueryHandler(button_handler))
     
     # Start the Bot
-    application.run_polling()
+    await application.initialize()
+    await application.start()
+    await application.updater.start_polling()
+    
+    logger.info("Bot started and polling for updates...")
+    
+    # Keep the bot running
+    try:
+        # Keep application running until stopped
+        await asyncio.Event().wait()
+    except (KeyboardInterrupt, SystemExit):
+        # Exit gracefully on Ctrl+C or system exit
+        pass
+    finally:
+        # Stop the application when finished
+        await application.stop()
 
 if __name__ == "__main__":
-    main()
+    # Use asyncio.run() to properly handle the event loop
+    import asyncio
+    asyncio.run(main())
