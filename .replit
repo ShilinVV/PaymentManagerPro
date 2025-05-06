@@ -2,14 +2,14 @@ modules = ["python-3.11"]
 
 [nix]
 channel = "stable-24_05"
-packages = ["openssl", "postgresql", "mongodb", "zip"]
+packages = ["openssl", "postgresql", "mongodb", "zip", "unzip"]
 
 [deployment]
 deploymentTarget = "autoscale"
 run = ["gunicorn", "--bind", "0.0.0.0:5000", "main:app"]
 
 [workflows]
-runButton = "Project"
+runButton = "telegram_vpn_bot"
 
 [[workflows.workflow]]
 name = "Project"
