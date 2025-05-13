@@ -14,7 +14,9 @@ from services.database_service import (
     create_subscription,
     update_subscription,
     get_user_subscriptions,
-    get_active_subscription
+    get_active_subscription,
+    get_user_access_keys,
+    create_access_key
 )
 from utils.helpers import format_bytes, format_expiry_date
 
@@ -285,11 +287,44 @@ async def add_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     try:
         # Create user in Marzban
-        await marzban_service.create_user(
-            username,
-            data_limit=plan['data_limit'],
-            days=plan['duration']
-        )
+        # Create new subscription in database
+        subscription_id = str(ObjectId())
+        plan_id = context.user_data.get("selected_plan")
+        days = plan.get("duration", 30)  # Default to 30 days if not specified
+        
+        # Create subscription
+        subscription_data = {
+            "subscription_id": subscription_id,
+            "user_id": telegram_id,
+            "plan_id": plan_id,
+            "status": "active",
+            "created_at": datetime.now().timestamp(),
+            "expires_at": datetime.now().timestamp() + days * 86400,
+        }
+        await create_subscription(subscription_data)
+        
+        # Create access key via Outline API
+        try:
+            key_info = await outline_service.create_key_with_expiration(
+                days=days,
+                name=f"{username} {subscription_id[:8]}"
+            )
+            
+            # Save key info to database
+            key_data = {
+                "key_id": key_info["id"],
+                "user_id": telegram_id,
+                "subscription_id": subscription_id,
+                "name": key_info.get("name", f"Key for {username}"),
+                "access_url": key_info["accessUrl"],
+                "created_at": datetime.now().timestamp(),
+            }
+            await create_access_key(key_data)
+            
+            # Update user data
+            await update_user(telegram_id, {"has_active_subscription": True})
+        except Exception as e:
+            logger.error(f"Error creating Outline key for user {username}: {e}")
         
         await update.message.reply_text(
             f"✅ Пользователь успешно создан!\n\n"
@@ -322,13 +357,47 @@ async def delete_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     username = args[0]
     
     try:
-        # Delete user from Marzban
-        success = await marzban_service.delete_user(username)
+        # Find user by username
+        user = None
+        all_users = await get_all_users()
+        for u in all_users:
+            if u.get("username") == username:
+                user = u
+                break
         
-        if success:
-            await update.message.reply_text(f"✅ Пользователь {username} успешно удален.")
-        else:
-            await update.message.reply_text(f"❌ Не удалось удалить пользователя {username}.")
+        if not user:
+            await update.message.reply_text(f"❌ Пользователь с именем {username} не найден.")
+            return
+        
+        user_id = user.get("telegram_id")
+        
+        # Get all active subscriptions and keys
+        subscriptions = await get_user_subscriptions(user_id)
+        access_keys = await get_user_access_keys(user_id)
+        
+        # Delete all keys in Outline
+        deleted_keys = 0
+        for key in access_keys:
+            try:
+                key_id = key.get("key_id")
+                await outline_service.delete_key(key_id)
+                deleted_keys += 1
+            except Exception as e:
+                logger.error(f"Error deleting key {key.get('key_id')} for user {username}: {e}")
+        
+        # Update user data
+        await update_user(user_id, {"has_active_subscription": False})
+        
+        # Set all subscriptions to inactive
+        for sub in subscriptions:
+            sub_id = sub.get("subscription_id")
+            await update_subscription(sub_id, {"status": "inactive"})
+        
+        await update.message.reply_text(
+            f"✅ Пользователь {username} успешно удален.\n"
+            f"- Удалено ключей: {deleted_keys}/{len(access_keys)}\n"
+            f"- Деактивировано подписок: {len(subscriptions)}"
+        )
     except Exception as e:
         logger.error(f"Error deleting user: {e}")
         await update.message.reply_text(f"❌ Ошибка при удалении пользователя: {str(e)}")
@@ -340,12 +409,15 @@ async def list_users_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     
     try:
-        # Get all users from Marzban
-        marzban_users = await marzban_service.get_all_users()
+        # Get all users from database
+        all_users = await get_all_users()
         
-        if not marzban_users:
+        if not all_users:
             await update.message.reply_text("📊 Пользователи не найдены.")
             return
+        
+        # Get all keys from Outline API to get usage data
+        outline_keys = await outline_service.get_keys()
         
         users_text = "📊 <b>Список пользователей:</b>\n\n"
         
