@@ -11,7 +11,7 @@ from services.database_service import (
     create_user, get_user, update_user, get_active_subscription,
     create_subscription, update_subscription, get_user_subscriptions,
     create_access_key, get_user_access_keys, get_access_key,
-    update_access_key, get_expiring_subscriptions
+    update_access_key, get_expiring_subscriptions, get_subscription
 )
 from utils.helpers import format_bytes, format_expiry_date
 
@@ -115,7 +115,7 @@ async def check_subscription_expiry():
             reply_markup = InlineKeyboardMarkup(keyboard)
             
             try:
-                from telegram.bot import Bot
+                from telegram import Bot
                 bot = Bot(token=os.environ.get("BOT_TOKEN"))
                 await bot.send_message(
                     chat_id=user_id,
