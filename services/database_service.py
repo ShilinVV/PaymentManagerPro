@@ -25,8 +25,17 @@ async def init_database():
     """Initialize the MongoDB connection"""
     global client, db
     try:
-        # Use MongoDB Atlas URI with timeout settings
-        client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
+        # Use MongoDB Atlas URI with timeout settings and TLS/SSL options
+        client = MongoClient(
+            MONGO_URI,
+            serverSelectionTimeoutMS=5000,
+            ssl=True,
+            ssl_cert_reqs='CERT_NONE',  # Отключает проверку сертификата для решения SSL проблем
+            connect=False,  # Lazy connection
+            retryWrites=True,
+            connectTimeoutMS=5000,
+            socketTimeoutMS=5000
+        )
         # Test connection
         client.admin.command('ping')
         db = client[MONGO_DB_NAME]
