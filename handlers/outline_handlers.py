@@ -364,12 +364,18 @@ async def keys_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         key_name = key.get("name", f"Ключ {i}")
         created_at = key.get("created_at")
         created_str = created_at.strftime("%d.%m.%Y") if created_at else "Неизвестно"
+        key_id = key.get("key_id")
         
         message += f"{i}. *{key_name}*\n"
         message += f"   Создан: {created_str}\n\n"
     
     # Create keyboard based on number of keys
     keyboard = []
+    
+    # Add individual key buttons
+    for i, key in enumerate(access_keys, 1):
+        key_id = key.get("key_id")
+        keyboard.append([InlineKeyboardButton(f"📲 Показать ссылку для ключа {i}", callback_data=f"show_key_{key_id}")])
     
     if len(access_keys) < max_devices:
         keyboard.append([InlineKeyboardButton("➕ Создать ключ", callback_data="create_key")])
