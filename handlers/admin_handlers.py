@@ -62,7 +62,7 @@ async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     data = query.data
     
     if data == "admin_list_users":
-        # Get all users from Marzban
+        # Get all users from database
         try:
             all_users = await get_all_users()
             
@@ -75,44 +75,50 @@ async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                 )
                 return
             
+            # Get all keys from Outline API to get usage data
+            outline_keys = await outline_service.get_keys()
+            
             users_text = "📊 <b>Список пользователей:</b>\n\n"
             
-            for user in all_users[:10]:  # Limit to 10 users to avoid message too long
+            # Process first 10 users to avoid message too long
+            for user in all_users[:10]:
                 telegram_id = user.get("telegram_id")
                 username = user.get("username", "Unknown")
-                full_name = user.get("full_name", "Unknown")
-                # Get user's active subscription
-                active_subscription = await get_active_subscription(telegram_id)
-                if active_subscription:
-                    plan_id = active_subscription.get("plan_id", "unknown")
-                    plan_name = VPN_PLANS.get(plan_id, {}).get("name", "Unknown")
-                    status = "✅ Active"
-                    expiry = format_expiry_date(active_subscription.get("expires_at", 0))
-                    
-                    # Get access keys for subscription
-                    access_keys = await get_user_access_keys(telegram_id)
-                    
-                    # Calculate usage
-                    total_usage = 0
-                    for key in access_keys:
-                        key_metrics = key.get("metrics", {})
-                        key_usage = key_metrics.get("bytesTransferred", 0)
-                        total_usage += key_usage
-                    
-                    used = format_bytes(total_usage)
-                else:
-                    status = "❌ No active subscription"
-                    used = "0 B"
-                    expiry = "N/A"
+                first_name = user.get("first_name", "")
+                has_active = user.get("has_active_subscription", False)
                 
-                users_text += f"👤 <code>{full_name}</code> (@{username}) - {status}\n"
+                display_name = f"{first_name} (@{username})" if first_name else f"@{username}"
+                status = "✅ Active" if has_active else "❌ Inactive"
                 
-                if active_subscription:
-                    plan_id = active_subscription.get("plan_id", "unknown")
+                # Get user subscriptions
+                subscriptions = await get_user_subscriptions(telegram_id, status="active")
+                
+                # Get user keys
+                access_keys = await get_user_access_keys(telegram_id)
+                
+                # Calculate traffic usage from Outline API
+                total_traffic = 0
+                for key in access_keys:
+                    key_id = key.get("key_id")
+                    # Check if key exists in outline_keys (metrics data)
+                    for outline_key in outline_keys.get("keys", []):
+                        if str(outline_key.get("id")) == str(key_id):
+                            # Add usage data
+                            total_traffic += outline_key.get("metrics", {}).get("bytesTransferred", 0)
+                
+                # Build user information
+                users_text += f"👤 <code>{display_name}</code> - {status}\n"
+                
+                if subscriptions:
+                    # Get the latest subscription
+                    latest_sub = max(subscriptions, key=lambda x: x.get("expires_at", 0))
+                    plan_id = latest_sub.get("plan_id", "unknown")
+                    expires_at = latest_sub.get("expires_at", 0)
+                    
                     plan_name = VPN_PLANS.get(plan_id, {}).get("name", "Unknown")
                     users_text += f"🔑 План: {plan_name}\n"
-                    users_text += f"📈 Трафик: {used}\n"
-                    users_text += f"⏳ До: {expiry}\n\n"
+                    users_text += f"📈 Трафик: {format_bytes(total_traffic)}\n"
+                    users_text += f"⏳ До: {format_expiry_date(expires_at)}\n\n"
                 else:
                     users_text += "\n"
             
@@ -203,15 +209,22 @@ async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     elif data == "admin_stats":
         # Get statistics
         try:
-            marzban_users = await marzban_service.get_all_users()
-            db_users = await get_all_users()
+            # Get all users from database
+            all_users = await get_all_users()
             
-            total_marzban_users = len(marzban_users) if marzban_users else 0
-            total_db_users = len(db_users) if db_users else 0
+            # Get all keys from Outline API
+            outline_keys = await outline_service.get_keys()
+            server_info = await outline_service.get_server_info()
             
-            active_users = sum(1 for user in marzban_users if user.get("status") == "active") if marzban_users else 0
+            total_db_users = len(all_users) if all_users else 0
             
-            total_traffic = sum(user.get("used_traffic", 0) for user in marzban_users) if marzban_users else 0
+            # Count active users (users with active subscriptions)
+            active_users = sum(1 for user in all_users if user.get("has_active_subscription", False)) if all_users else 0
+            
+            # Calculate total traffic usage
+            total_traffic = 0
+            for key in outline_keys.get("keys", []):
+                total_traffic += key.get("metrics", {}).get("bytesTransferred", 0)
             
             stats_text = "📊 <b>Статистика:</b>\n\n"
             stats_text += f"👥 Всего пользователей в базе: {total_db_users}\n"
@@ -421,19 +434,50 @@ async def list_users_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         
         users_text = "📊 <b>Список пользователей:</b>\n\n"
         
-        for user in marzban_users[:10]:  # Limit to 10 users to avoid message too long
+        # Process first 10 users to avoid message too long
+        for user in all_users[:10]:
+            telegram_id = user.get("telegram_id")
             username = user.get("username", "Unknown")
-            status = "✅" if user.get("status") == "active" else "❌"
-            used = format_bytes(user.get("used_traffic", 0))
-            data_limit = format_bytes(user.get("data_limit", 0)) if user.get("data_limit") else "∞"
-            expiry = format_expiry_date(user.get("expire", 0))
+            first_name = user.get("first_name", "")
+            has_active = user.get("has_active_subscription", False)
             
-            users_text += f"👤 <code>{username}</code> - {status}\n"
-            users_text += f"📈 Трафик: {used} / {data_limit}\n"
-            users_text += f"⏳ До: {expiry}\n\n"
+            status = "✅" if has_active else "❌"
+            display_name = f"{first_name} ({username})" if first_name else username
+            
+            # Get user subscriptions
+            subscriptions = await get_user_subscriptions(telegram_id, status="active")
+            
+            # Get user keys
+            access_keys = await get_user_access_keys(telegram_id)
+            
+            # Calculate traffic usage
+            total_traffic = 0
+            for key in access_keys:
+                key_id = key.get("key_id")
+                # Check if key exists in outline_keys (metrics data)
+                for outline_key in outline_keys.get("keys", []):
+                    if str(outline_key.get("id")) == str(key_id):
+                        # Add usage data
+                        total_traffic += outline_key.get("metrics", {}).get("bytesTransferred", 0)
+            
+            # Format user information
+            users_text += f"👤 <code>{display_name}</code> - {status}\n"
+            users_text += f"📈 Трафик: {format_bytes(total_traffic)}\n"
+            
+            # Show subscription expiry if available
+            if subscriptions:
+                # Get the latest subscription
+                latest_sub = max(subscriptions, key=lambda x: x.get("expires_at", 0))
+                expires_at = latest_sub.get("expires_at", 0)
+                if expires_at:
+                    users_text += f"⏳ До: {format_expiry_date(expires_at)}\n\n"
+                else:
+                    users_text += "\n"
+            else:
+                users_text += "\n"
         
-        if len(marzban_users) > 10:
-            users_text += f"...и еще {len(marzban_users) - 10} пользователей"
+        if len(all_users) > 10:
+            users_text += f"...и еще {len(all_users) - 10} пользователей"
         
         await update.message.reply_text(users_text, parse_mode="HTML")
     except Exception as e:
