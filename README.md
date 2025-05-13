@@ -1,17 +1,18 @@
 # Telegram VPN Bot
 
-Бот для Telegram с функциями управления VPN и интеграцией с платёжной системой ЮKassa.
+Бот для Telegram с функциями управления VPN через Outline API и интеграцией с платёжной системой ЮKassa.
 
 ## Особенности
-- Управление VPN-аккаунтами через Marzban API
+- Управление VPN-ключами через Outline API
 - Интеграция с ЮKassa для обработки платежей
-- MongoDB для хранения пользователей и заказов
-- Возможности администрирования через Telegram
+- MongoDB для хранения пользователей, подписок и ключей доступа
+- Административная панель через интерфейс Telegram
+- Гибкие тарифные планы с различными периодами и ценами
 
 ## Требования
 - Python 3.11 или выше
 - MongoDB
-- Marzban API
+- Outline VPN Server
 - Доступ к API Telegram Bot
 - Аккаунт ЮKassa
 
@@ -47,9 +48,7 @@ nano .env
 - `YUKASSA_SECRET_KEY` - секретный ключ ЮKassa
 - `ADMIN_IDS` - ID администраторов (через запятую)
 - `MONGODB_URI` - URI подключения к MongoDB
-- `MARZBAN_API_BASE_URL` - URL API Marzban
-- `MARZBAN_USERNAME` - логин для доступа к API Marzban
-- `MARZBAN_PASSWORD` - пароль для доступа к API Marzban
+- `OUTLINE_API_URL` - URL API Outline VPN сервера
 
 ### 3. Установка зависимостей
 

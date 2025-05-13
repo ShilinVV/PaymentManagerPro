@@ -31,8 +31,8 @@ def api_status():
     # Check if YooKassa is configured
     yukassa_configured = bool(os.getenv("YUKASSA_SHOP_ID")) and bool(os.getenv("YUKASSA_SECRET_KEY"))
     
-    # Check if Marzban API is configured
-    marzban_configured = bool(os.getenv("MARZBAN_API_BASE_URL"))
+    # Check if Outline API is configured
+    outline_configured = bool(os.getenv("OUTLINE_API_URL"))
     
     # Count available plans
     plans_count = len(VPN_PLANS) if VPN_PLANS else 0
@@ -42,7 +42,7 @@ def api_status():
         "bot_status": "running",
         "api_status": "running",
         "yukassa_configured": yukassa_configured,
-        "marzban_configured": marzban_configured,
+        "outline_configured": outline_configured,
         "plans_available": plans_count
     })
 
