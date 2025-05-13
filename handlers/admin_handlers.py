@@ -62,9 +62,9 @@ async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     if data == "admin_list_users":
         # Get all users from Marzban
         try:
-            marzban_users = await marzban_service.get_all_users()
+            all_users = await get_all_users()
             
-            if not marzban_users:
+            if not all_users:
                 await query.edit_message_text(
                     "📊 Пользователи не найдены.",
                     reply_markup=InlineKeyboardMarkup([[
@@ -75,19 +75,47 @@ async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             
             users_text = "📊 <b>Список пользователей:</b>\n\n"
             
-            for user in marzban_users[:10]:  # Limit to 10 users to avoid message too long
+            for user in all_users[:10]:  # Limit to 10 users to avoid message too long
+                telegram_id = user.get("telegram_id")
                 username = user.get("username", "Unknown")
-                status = "✅" if user.get("status") == "active" else "❌"
-                used = format_bytes(user.get("used_traffic", 0))
-                data_limit = format_bytes(user.get("data_limit", 0)) if user.get("data_limit") else "∞"
-                expiry = format_expiry_date(user.get("expire", 0))
+                full_name = user.get("full_name", "Unknown")
+                # Get user's active subscription
+                active_subscription = await get_active_subscription(telegram_id)
+                if active_subscription:
+                    plan_id = active_subscription.get("plan_id", "unknown")
+                    plan_name = VPN_PLANS.get(plan_id, {}).get("name", "Unknown")
+                    status = "✅ Active"
+                    expiry = format_expiry_date(active_subscription.get("expires_at", 0))
+                    
+                    # Get access keys for subscription
+                    access_keys = await get_user_access_keys(telegram_id)
+                    
+                    # Calculate usage
+                    total_usage = 0
+                    for key in access_keys:
+                        key_metrics = key.get("metrics", {})
+                        key_usage = key_metrics.get("bytesTransferred", 0)
+                        total_usage += key_usage
+                    
+                    used = format_bytes(total_usage)
+                else:
+                    status = "❌ No active subscription"
+                    used = "0 B"
+                    expiry = "N/A"
                 
-                users_text += f"👤 <code>{username}</code> - {status}\n"
-                users_text += f"📈 Трафик: {used} / {data_limit}\n"
-                users_text += f"⏳ До: {expiry}\n\n"
+                users_text += f"👤 <code>{full_name}</code> (@{username}) - {status}\n"
+                
+                if active_subscription:
+                    plan_id = active_subscription.get("plan_id", "unknown")
+                    plan_name = VPN_PLANS.get(plan_id, {}).get("name", "Unknown")
+                    users_text += f"🔑 План: {plan_name}\n"
+                    users_text += f"📈 Трафик: {used}\n"
+                    users_text += f"⏳ До: {expiry}\n\n"
+                else:
+                    users_text += "\n"
             
-            if len(marzban_users) > 10:
-                users_text += f"...и еще {len(marzban_users) - 10} пользователей"
+            if len(all_users) > 10:
+                users_text += f"...и еще {len(all_users) - 10} пользователей"
             
             await query.edit_message_text(
                 users_text,
