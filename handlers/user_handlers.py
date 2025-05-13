@@ -5,20 +5,21 @@ from telegram.ext import ContextTypes
 from bson import ObjectId
 
 from config import VPN_PLANS, YUKASSA_SHOP_ID
-from services.marzban_service import MarzbanService
+from services.outline_service import OutlineService
 from services.payment_service import create_payment, check_payment
 from services.database_service import (
     get_user,
     create_user,
     update_user,
-    create_order,
-    update_order,
-    get_user_active_subscription
+    create_subscription,
+    update_subscription,
+    get_user_subscriptions,
+    get_active_subscription
 )
 from utils.helpers import format_bytes, format_expiry_date
 
 logger = logging.getLogger(__name__)
-marzban_service = MarzbanService()
+outline_service = OutlineService()
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler for the /start command"""

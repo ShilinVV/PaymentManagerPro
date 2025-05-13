@@ -9,7 +9,7 @@ from yookassa import Configuration, Payment
 from yookassa.domain.notification import WebhookNotification
 
 from config import YUKASSA_SHOP_ID, YUKASSA_SECRET_KEY, VPN_PLANS
-from services.database_service import get_order, update_order
+from services.database_service import get_payment, update_payment, get_subscription, update_subscription
 
 logger = logging.getLogger(__name__)
 
@@ -19,15 +19,15 @@ try:
 except Exception as e:
     logger.error(f"Failed to configure YooKassa: {e}")
 
-async def create_payment(order_id, user_id):
+async def create_payment(subscription_id, user_id):
     """Create a payment with YooKassa"""
     try:
-        # Get order details
-        order = await get_order(ObjectId(order_id))
-        if not order:
-            raise ValueError(f"Order {order_id} not found")
+        # Get subscription details
+        subscription = await get_subscription(subscription_id)
+        if not subscription:
+            raise ValueError(f"Subscription {subscription_id} not found")
         
-        plan_id = order.get("plan_id")
+        plan_id = subscription.get("plan_id")
         if not plan_id or plan_id not in VPN_PLANS:
             raise ValueError(f"Invalid plan ID: {plan_id}")
         
@@ -52,15 +52,32 @@ async def create_payment(order_id, user_id):
             },
             "description": f"Оплата услуг VPN, тариф {plan.get('name')}",
             "metadata": {
-                "order_id": str(order_id),
+                "subscription_id": str(subscription_id),
                 "user_id": user_id
             }
         }, idempotence_key)
         
-        # Update order with payment ID
-        await update_order(ObjectId(order_id), {
+        # Create payment record in database
+        from services.database_service import create_payment as db_create_payment
+        
+        payment_data = {
             "payment_id": payment.id,
-            "idempotence_key": idempotence_key
+            "user_id": user_id,
+            "subscription_id": subscription_id,
+            "amount": amount,
+            "currency": "RUB",
+            "status": "pending",
+            "idempotence_key": idempotence_key,
+            "created_at": datetime.now(),
+            "updated_at": datetime.now()
+        }
+        
+        await db_create_payment(payment_data)
+        
+        # Update subscription with payment ID
+        await update_subscription(subscription_id, {
+            "payment_id": payment.id,
+            "payment_status": "pending"
         })
         
         # Return confirmation URL

@@ -5,26 +5,20 @@ from telegram.ext import (
     Application,
     CommandHandler,
     CallbackQueryHandler,
-    MessageHandler,
-    filters,
-    ConversationHandler,
-    PreCheckoutQueryHandler
+    ConversationHandler
 )
 from dotenv import load_dotenv
 
 # Import Flask app for gunicorn
 from app import app
 
-from handlers.user_handlers import (
+from handlers.outline_handlers import (
     start_command, 
     button_handler, 
     status_command,
     plans_command,
-    buy_handler,
-    payment_handler,
-    pre_checkout_handler,
-    successful_payment_handler,
-    help_command
+    help_command,
+    check_subscription_expiry
 )
 from handlers.admin_handlers import (
     admin_command,
@@ -70,10 +64,6 @@ async def main():
     application.add_handler(CommandHandler("status", status_command))
     application.add_handler(CommandHandler("plans", plans_command))
     
-    # Payment handlers
-    application.add_handler(PreCheckoutQueryHandler(pre_checkout_handler))
-    application.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_handler))
-    
     # Admin command handlers
     application.add_handler(CommandHandler("admin", admin_command))
     application.add_handler(CommandHandler("add_user", add_user_command))
@@ -83,8 +73,6 @@ async def main():
     
     # Callback query handlers
     application.add_handler(CallbackQueryHandler(admin_button_handler, pattern="^admin_"))
-    application.add_handler(CallbackQueryHandler(buy_handler, pattern="^buy_"))
-    application.add_handler(CallbackQueryHandler(payment_handler, pattern="^pay_"))
     application.add_handler(CallbackQueryHandler(button_handler))
     
     # Start the Bot
