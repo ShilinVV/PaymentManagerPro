@@ -84,7 +84,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = query.from_user.id
         user = await get_user(user_id)
         
-        if not user or not user.get("marzban_username"):
+        # Проверяем, есть ли активная подписка у пользователя
+        active_subscription = await get_active_subscription(user_id)
+        if not user or not active_subscription:
             keyboard = [
                 [InlineKeyboardButton("💰 Купить доступ", callback_data="buy")],
                 [InlineKeyboardButton("↩️ Назад", callback_data="back_to_main")]
@@ -355,8 +357,8 @@ async def payment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"🔹 Тариф: <b>{plan['name']}</b>\n"
                     f"💾 Трафик: {format_bytes(plan['data_limit'])}\n"
                     f"⏳ Срок действия: {plan['duration']} дней\n\n"
-                    f"👤 Логин: <code>{marzban_username}</code>\n\n"
-                    f"Для получения конфигурации, обратитесь к администратору.",
+                    f"👤 Telegram ID: <code>{user_id}</code>\n\n"
+                    f"Для получения ваших ключей доступа, используйте команду /keys",
                     reply_markup=reply_markup,
                     parse_mode="HTML"
                 )
