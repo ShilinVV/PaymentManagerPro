@@ -470,12 +470,6 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Error getting subscription status: {e}")
         await update.message.reply_text(
-            "❌ Не удалось получить информацию о вашей подписке.\n"
-            "Попробуйте позже или обратитесь к администратору."
-            )
-    except Exception as e:
-        logger.error(f"Error getting user status: {e}")
-        await update.message.reply_text(
             "❌ Произошла ошибка при получении статуса.\n"
             "Попробуйте позже или обратитесь к администратору."
         )

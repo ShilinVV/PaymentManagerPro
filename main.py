@@ -18,6 +18,7 @@ from handlers.outline_handlers import (
     status_command,
     plans_command,
     help_command,
+    keys_command,
     check_subscription_expiry
 )
 from handlers.admin_handlers import (
@@ -63,6 +64,7 @@ async def main():
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("status", status_command))
     application.add_handler(CommandHandler("plans", plans_command))
+    application.add_handler(CommandHandler("keys", keys_command))
     
     # Admin command handlers
     application.add_handler(CommandHandler("admin", admin_command))
