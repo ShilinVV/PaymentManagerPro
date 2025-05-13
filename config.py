@@ -4,9 +4,9 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-# MongoDB configuration
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
-MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "users-outline")
+# Database configuration
+DATABASE_URL = os.getenv("DATABASE_URL")
+USE_SQL_DATABASE = bool(DATABASE_URL)
 
 # Outline API configuration
 OUTLINE_API_URL = os.getenv("OUTLINE_API_URL")

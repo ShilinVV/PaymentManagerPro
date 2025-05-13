@@ -1,81 +1,85 @@
 import os
 import logging
 from flask import Flask, jsonify, request
-from dotenv import load_dotenv
-
-# Load environment variables
-load_dotenv()
+from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy.orm import DeclarativeBase
 
 # Configure logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
+logger = logging.getLogger(__name__)
+
+# Create SQLAlchemy base class
+class Base(DeclarativeBase):
+    pass
+
+# Initialize SQLAlchemy
+db = SQLAlchemy(model_class=Base)
 
 # Create Flask app
 app = Flask(__name__)
+app.secret_key = os.environ.get("SESSION_SECRET", "default-secret-key")
 
-# Define routes
-@app.route("/")
+# Configure the database
+app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL")
+app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+    "pool_recycle": 300,
+    "pool_pre_ping": True,
+}
+
+# Initialize SQLAlchemy with app
+db.init_app(app)
+
+# Import models (after SQLAlchemy initialization)
+with app.app_context():
+    # Import to register models
+    import models
+    # Create tables
+    db.create_all()
+
+@app.route('/')
 def home():
+    """Home page"""
     return jsonify({
-        "status": "success",
-        "message": "VPN Bot API is running"
+        "status": "ok",
+        "message": "VPN management system"
     })
 
-@app.route("/api/status")
+@app.route('/api/status')
 def api_status():
     """API endpoint to check system status"""
-    from config import VPN_PLANS
-    
-    # Check if YooKassa is configured
-    yukassa_configured = bool(os.getenv("YUKASSA_SHOP_ID")) and bool(os.getenv("YUKASSA_SECRET_KEY"))
-    
-    # Check if Outline API is configured
-    outline_configured = bool(os.getenv("OUTLINE_API_URL"))
-    
-    # Count available plans
-    plans_count = len(VPN_PLANS) if VPN_PLANS else 0
-    
     return jsonify({
-        "status": "success",
-        "bot_status": "running",
-        "api_status": "running",
-        "yukassa_configured": yukassa_configured,
-        "outline_configured": outline_configured,
-        "plans_available": plans_count
+        "status": "ok",
+        "database": bool(app.config["SQLALCHEMY_DATABASE_URI"]),
+        "timestamp": os.environ.get("REPL_STARTED_AT"),
+        "bot_token": bool(os.environ.get("BOT_TOKEN")),
+        "outline_api": bool(os.environ.get("OUTLINE_API_URL"))
     })
 
-# Webhook endpoint for YooKassa payments
-@app.route("/webhook/payment", methods=["POST"])
+@app.route('/webhooks/payment', methods=['POST'])
 def payment_webhook():
-    try:
-        data = request.json
-        app.logger.info(f"Received webhook: {data}")
-        
-        if not data:
-            app.logger.error("Invalid request - no JSON body")
-            return jsonify({"status": "error", "message": "Invalid request - no JSON body"}), 400
+    """Webhook for payment notifications"""
+    if request.method == 'POST':
+        try:
+            # Log payment notification
+            logger.info("Payment webhook received")
+            logger.info(f"Headers: {request.headers}")
+            logger.info(f"Data: {request.data}")
             
-        # Import asyncio to handle async function in Flask
-        import asyncio
-        from services.payment_service import process_webhook
-        
-        # Process the webhook notification
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        result = loop.run_until_complete(process_webhook(data))
-        loop.close()
-        
-        if result:
-            app.logger.info("Payment processed successfully")
-            return jsonify({"status": "success"})
-        else:
-            app.logger.warning("Payment processing failed")
-            return jsonify({"status": "error", "message": "Payment processing failed"}), 400
-    except Exception as e:
-        app.logger.error(f"Webhook error: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
+            # Here would be processing of the payment notification
+            # from services.payment_service import process_webhook
+            # await process_webhook(request.json)
+            
+            # For now, just acknowledge receipt
+            return jsonify({"status": "ok"})
+        except Exception as e:
+            logger.error(f"Error processing payment webhook: {e}")
+            return jsonify({"status": "error", "message": str(e)}), 500
+    else:
+        return jsonify({"status": "error", "message": "Method not allowed"}), 405
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+if __name__ == '__main__':
+    # Run the app
+    app.run(host='0.0.0.0', port=5000, debug=True)

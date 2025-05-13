@@ -29,7 +29,14 @@ from handlers.admin_handlers import (
     broadcast_command,
     admin_button_handler
 )
-from services.database_service import init_database
+
+# Import database services
+from config import USE_SQL_DATABASE
+if USE_SQL_DATABASE:
+    from services.database_service_sql import init_database
+    from models import init_db
+else:
+    from services.database_service import init_database
 
 # Load environment variables
 load_dotenv()
@@ -43,7 +50,15 @@ logger = logging.getLogger(__name__)
 
 async def init():
     """Initialize database connection"""
-    # Initialize MongoDB connection
+    if USE_SQL_DATABASE:
+        # Initialize SQLAlchemy models
+        try:
+            init_db()
+            logger.info("SQL database initialized")
+        except Exception as e:
+            logger.error(f"Error initializing SQL database: {e}")
+    
+    # Initialize database connection
     await init_database()
 
 async def main():
@@ -55,7 +70,7 @@ async def main():
         return
         
     # Run database initialization
-    await init_database()
+    await init()
         
     application = Application.builder().token(token).build()
     

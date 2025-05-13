@@ -5,7 +5,9 @@ from pymongo import MongoClient, ASCENDING, DESCENDING
 from pymongo.errors import ConnectionFailure
 from bson.objectid import ObjectId
 
-from config import MONGO_URI, MONGO_DB_NAME
+# MongoDB configuration
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
+MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "users-outline")
 
 logger = logging.getLogger(__name__)
 
