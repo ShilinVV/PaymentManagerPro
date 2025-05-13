@@ -6,14 +6,12 @@ load_dotenv()
 
 # MongoDB configuration
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
-MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "vpn_bot")
+MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "users-outline")
 
-# Marzban API configuration
-MARZBAN_API_BASE_URL = os.getenv("MARZBAN_API_BASE_URL", "http://localhost:8000")
-MARZBAN_API_USERNAME = os.getenv("MARZBAN_API_USERNAME")
-MARZBAN_API_PASSWORD = os.getenv("MARZBAN_API_PASSWORD")
+# Outline API configuration
+OUTLINE_API_URL = os.getenv("OUTLINE_API_URL")
 
-# ЮKassa configuration
+# ЮKassa configuration (может использоваться в будущем)
 YUKASSA_SHOP_ID = os.getenv("YUKASSA_SHOP_ID")
 YUKASSA_SECRET_KEY = os.getenv("YUKASSA_SECRET_KEY")
 
@@ -23,22 +21,45 @@ ADMIN_IDS = list(map(int, os.getenv("ADMIN_IDS", "").split(","))) if os.getenv("
 
 # VPN service configuration
 VPN_PLANS = {
-    "basic": {
-        "name": "Базовый",
-        "data_limit": 10 * 1024 * 1024 * 1024,  # 10 GB in bytes
-        "duration": 30,  # days
-        "price": 299.00  # rubles
+    "test": {
+        "name": "Тестовый",
+        "duration": 3,  # days
+        "price": 0.00,  # бесплатно
+        "devices": 2,   # количество устройств
+        "description": "Тестовый период на 3 дня для двух устройств (мобильный и компьютер)."
     },
-    "standard": {
-        "name": "Стандартный",
-        "data_limit": 50 * 1024 * 1024 * 1024,  # 50 GB in bytes
+    "monthly": {
+        "name": "Месячный",
         "duration": 30,  # days
-        "price": 599.00  # rubles
+        "price": 150.00,  # rubles
+        "devices": 2,   # количество устройств
+        "description": "Доступ к VPN на 1 месяц без ограничений по трафику."
     },
-    "premium": {
-        "name": "Премиум",
-        "data_limit": 100 * 1024 * 1024 * 1024,  # 100 GB in bytes
-        "duration": 30,  # days
-        "price": 999.00  # rubles
+    "quarterly": {
+        "name": "Квартальный",
+        "duration": 90,  # days
+        "price": 425.00,  # rubles
+        "discount": "5%",
+        "devices": 3,   # количество устройств
+        "description": "Доступ к VPN на 3 месяца со скидкой 5%. Возможность подключения до 3 устройств."
+    },
+    "semi_annual": {
+        "name": "Полугодовой",
+        "duration": 180,  # days
+        "price": 765.00,  # rubles
+        "discount": "15%",
+        "devices": 3,   # количество устройств
+        "description": "Доступ к VPN на 6 месяцев со скидкой 15%. Возможность подключения до 3 устройств."
+    },
+    "annual": {
+        "name": "Годовой",
+        "duration": 365,  # days
+        "price": 1260.00,  # rubles
+        "discount": "30%",
+        "devices": 5,   # количество устройств
+        "description": "Доступ к VPN на 12 месяцев со скидкой 30%. Возможность подключения до 5 устройств."
     }
 }
+
+# Notification settings
+EXPIRY_NOTIFICATION_DAYS = 1  # За сколько дней до окончания подписки отправлять уведомление
