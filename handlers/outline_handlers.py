@@ -834,6 +834,46 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     # Create key
+    elif data.startswith("show_key_"):
+        # Extract key ID from callback data
+        key_id = data.replace("show_key_", "")
+        
+        # Get access key
+        key = await get_access_key(key_id)
+        
+        if not key:
+            await query.edit_message_text(
+                "⚠️ Ключ не найден или был удален.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("↩️ Назад к списку ключей", callback_data="keys")]
+                ])
+            )
+            return
+        
+        # Get key name and access URL
+        key_name = key.get("name", "Ключ без имени")
+        access_url = key.get("access_url", "Ссылка недоступна")
+        
+        message = (
+            f"*Информация о ключе:* {key_name}\n\n"
+            f"Для подключения устройства, откройте приложение Outline и добавьте доступ по ссылке ниже:\n\n"
+            f"`{access_url}`\n\n"
+            f"Или отсканируйте QR-код в приложении Outline.\n\n"
+            f"Инструкция по установке Outline доступна по команде /help."
+        )
+        
+        # Create keyboard
+        keyboard = [
+            [InlineKeyboardButton("↩️ Назад к списку ключей", callback_data="keys")],
+            [InlineKeyboardButton("📱 Инструкция по подключению", callback_data="help")]
+        ]
+        
+        await query.edit_message_text(
+            message,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
+        
     elif data == "create_key":
         # Get active subscription
         subscription = await get_active_subscription(user.id)
