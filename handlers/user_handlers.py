@@ -435,22 +435,43 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [
             [InlineKeyboardButton("💰 Продлить доступ", callback_data="buy")]
         ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            await update.message.reply_text(
-                f"📊 <b>Статус вашего аккаунта:</b>\n\n"
-                f"👤 Логин: <code>{marzban_username}</code>\n"
-                f"🔋 Статус: {status}\n"
-                f"📈 Трафик: {used} из {data_limit}\n"
-                f"⏳ Действует до: {expiry}\n\n"
-                f"Для получения конфигурации, обратитесь к администратору.",
-                reply_markup=reply_markup,
-                parse_mode="HTML"
-            )
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        # Получаем количество активных ключей и максимальное количество устройств
+        active_keys_count = len(access_keys)
+        max_devices = plan.get("devices", 1)
+        
+        # Получим ссылки на конфигурацию
+        key_urls = []
+        for key in access_keys:
+            if "access_url" in key:
+                key_urls.append(key.get("access_url"))
+        
+        message = f"📊 <b>Статус вашей подписки:</b>\n\n" \
+                 f"🚀 План: {plan.get('name', 'Стандартный')}\n" \
+                 f"🔋 Статус: {status}\n" \
+                 f"📈 Трафик: {used}\n" \
+                 f"📱 Устройства: {active_keys_count} из {max_devices}\n" \
+                 f"⏳ Действует до: {expiry}\n\n"
+        
+        # Добавим ссылки на конфигурацию
+        if key_urls:
+            message += "<b>Ваши ключи доступа:</b>\n"
+            for i, url in enumerate(key_urls, 1):
+                message += f"{i}. <code>{url}</code>\n"
         else:
-            await update.message.reply_text(
-                "❌ Не удалось получить информацию о вашем аккаунте.\n"
-                "Попробуйте позже или обратитесь к администратору."
+            message += "У вас пока нет ключей доступа. Используйте /keys для их создания."
+            
+        await update.message.reply_text(
+            message,
+            reply_markup=reply_markup,
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logger.error(f"Error getting subscription status: {e}")
+        await update.message.reply_text(
+            "❌ Не удалось получить информацию о вашей подписке.\n"
+            "Попробуйте позже или обратитесь к администратору."
             )
     except Exception as e:
         logger.error(f"Error getting user status: {e}")

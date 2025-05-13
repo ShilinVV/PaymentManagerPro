@@ -26,15 +26,16 @@ async def init_database():
     global client, db
     try:
         # Use MongoDB Atlas URI with timeout settings and TLS/SSL options
+        # Обновленные параметры для исправления проблем с TLS
         client = MongoClient(
             MONGO_URI,
-            serverSelectionTimeoutMS=5000,
-            tls=True,
-            tlsAllowInvalidCertificates=True,  # Отключает проверку сертификата для решения SSL проблем
+            serverSelectionTimeoutMS=10000,
+            tlsInsecure=True,  # Использовать вместо tlsAllowInvalidCertificates
             connect=False,  # Lazy connection
             retryWrites=True,
-            connectTimeoutMS=5000,
-            socketTimeoutMS=5000
+            connectTimeoutMS=10000,
+            socketTimeoutMS=10000,
+            appName="VPNBot"  # Добавляем имя приложения для отслеживания
         )
         # Test connection
         client.admin.command('ping')
