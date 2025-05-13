@@ -227,10 +227,17 @@ async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                 total_traffic += key.get("metrics", {}).get("bytesTransferred", 0)
             
             stats_text = "📊 <b>Статистика:</b>\n\n"
-            stats_text += f"👥 Всего пользователей в базе: {total_db_users}\n"
-            stats_text += f"👥 Всего аккаунтов в Marzban: {total_marzban_users}\n"
-            stats_text += f"✅ Активных аккаунтов: {active_users}\n"
+            stats_text += f"👥 Всего пользователей: {total_db_users}\n"
+            stats_text += f"✅ Активных подписок: {active_users}\n"
+            stats_text += f"🔑 Всего ключей: {len(outline_keys.get('keys', []))}\n"
             stats_text += f"📈 Общий трафик: {format_bytes(total_traffic)}\n"
+            
+            # Добавляем информацию о сервере, если она доступна
+            if server_info:
+                server_name = server_info.get("name", "Outline VPN")
+                server_version = server_info.get("version", "Unknown")
+                stats_text += f"\n🖥️ Сервер: {server_name}\n"
+                stats_text += f"📌 Версия: {server_version}\n"
             
             await query.edit_message_text(
                 stats_text,

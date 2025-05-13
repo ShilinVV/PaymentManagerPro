@@ -14,7 +14,10 @@ from services.database_service import (
     create_subscription,
     update_subscription,
     get_user_subscriptions,
-    get_active_subscription
+    get_active_subscription,
+    get_user_access_keys,
+    create_access_key,
+    get_access_key
 )
 from utils.helpers import format_bytes, format_expiry_date
 
@@ -96,20 +99,53 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         try:
-            # Get user account info from Marzban
-            marzban_username = user.get("marzban_username")
-            user_info = await marzban_service.get_user(marzban_username)
+            # Get user's active subscription
+            active_subscription = await get_active_subscription(user_id)
             
-            if user_info:
-                # Format used data
-                used = format_bytes(user_info.get("used_traffic", 0))
-                data_limit = format_bytes(user_info.get("data_limit", 0))
+            if active_subscription:
+                # Get subscription plan
+                plan_id = active_subscription.get("plan_id", "unknown")
+                plan = VPN_PLANS.get(plan_id, {})
                 
-                # Format expiration date
-                expiry = format_expiry_date(user_info.get("expire", 0))
+                # Format expiry date
+                expiry_timestamp = active_subscription.get("expires_at", 0)
+                expiry = format_expiry_date(expiry_timestamp)
+                
+                # Get access keys
+                access_keys = await get_user_access_keys(user_id)
+                
+                # Get all keys from Outline API to get usage data
+                outline_keys = await outline_service.get_keys()
+                
+                # Calculate traffic usage
+                total_traffic = 0
+                for key in access_keys:
+                    key_id = key.get("key_id")
+                    # Check if key exists in outline_keys (metrics data)
+                    for outline_key in outline_keys.get("keys", []):
+                        if str(outline_key.get("id")) == str(key_id):
+                            # Add usage data
+                            total_traffic += outline_key.get("metrics", {}).get("bytesTransferred", 0)
+                
+                # Format used data
+                used = format_bytes(total_traffic)
                 
                 # Get user status
-                status = "✅ Активен" if user_info.get("status") == "active" else "❌ Неактивен"
+                status = "✅ Активна" if active_subscription.get("status") == "active" else "❌ Неактивна"
+                
+                message_text = f"📊 <b>Статус вашей подписки:</b>\n\n"
+                message_text += f"🔑 План: {plan.get('name', 'Стандартный')}\n"
+                message_text += f"🔋 Статус: {status}\n"
+                message_text += f"📈 Использовано трафика: {used}\n"
+                message_text += f"⏳ Действует до: {expiry}\n\n"
+                
+                # Add config links if there are any keys
+                if access_keys:
+                    message_text += "🔐 <b>Ваши ключи доступа:</b>\n\n"
+                    for i, key in enumerate(access_keys[:2], 1):  # Limit to 2 keys to avoid message too long
+                        key_name = key.get("name", f"Ключ {i}")
+                        message_text += f"{i}. <b>{key_name}</b>:\n"
+                        message_text += f"<code>{key.get('access_url')}</code>\n\n"
                 
                 keyboard = [
                     [InlineKeyboardButton("🔄 Обновить", callback_data="status")],
@@ -119,12 +155,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 
                 await query.edit_message_text(
-                    f"📊 <b>Статус вашего аккаунта:</b>\n\n"
-                    f"👤 Логин: <code>{marzban_username}</code>\n"
-                    f"🔋 Статус: {status}\n"
-                    f"📈 Трафик: {used} из {data_limit}\n"
-                    f"⏳ Действует до: {expiry}\n\n"
-                    f"Для получения конфигурации, обратитесь к администратору.",
+                    message_text,
                     reply_markup=reply_markup,
                     parse_mode="HTML"
                 )
