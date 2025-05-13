@@ -289,27 +289,54 @@ async def payment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 plan_id = order.get("plan_id")
                 plan = VPN_PLANS[plan_id]
                 
-                marzban_username = user.get("marzban_username")
+                # Create subscription in database
+                from datetime import datetime, timedelta
+                from utils.helpers import calculate_expiry
                 
-                # Check if user already has an account in Marzban
-                if marzban_username:
-                    # Update existing user
-                    await marzban_service.update_user(
-                        marzban_username,
-                        data_limit=plan['data_limit'],
-                        days=plan['duration']
-                    )
-                else:
-                    # Create new user in Marzban
-                    marzban_username = f"tg_{user_id}"
-                    await marzban_service.create_user(
-                        marzban_username,
-                        data_limit=plan['data_limit'],
-                        days=plan['duration']
+                # Set subscription period
+                expires_at = calculate_expiry(plan['duration'])
+                
+                # Create or update subscription
+                subscription_data = {
+                    "user_id": user_id,
+                    "plan_id": plan_id,
+                    "status": "active",
+                    "created_at": datetime.now(),
+                    "expires_at": expires_at,
+                    "order_id": order_id
+                }
+                
+                subscription_id = await create_subscription(subscription_data)
+                
+                # Create VPN access key in Outline
+                device_limit = plan.get('devices', 1)
+                
+                # Create keys for the user
+                for i in range(device_limit):
+                    device_name = f"Device {i+1}" if i > 0 else "Main device"
+                    key_name = f"{user.get('username', f'User_{user_id}')} - {device_name}"
+                    
+                    # Create key in Outline
+                    key_data = await outline_service.create_key_with_expiration(
+                        days=plan['duration'],
+                        name=key_name
                     )
                     
-                    # Update user in database with Marzban username
-                    await update_user(user_id, {"marzban_username": marzban_username})
+                    if key_data:
+                        # Save key to database
+                        key_db = {
+                            "user_id": user_id,
+                            "subscription_id": str(subscription_id),
+                            "key_id": key_data.get("id"),
+                            "name": key_name,
+                            "access_url": key_data.get("accessUrl"),
+                            "created_at": datetime.now(),
+                            "expires_at": expires_at
+                        }
+                        await create_access_key(key_db)
+                    
+                    # Update user in database with subscription status
+                    await update_user(user_id, {"has_active_subscription": True})
                 
                 # Update order status
                 await update_order(ObjectId(order_id), {
@@ -360,38 +387,54 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user = await get_user(user_id)
     
-    if not user or not user.get("marzban_username"):
+    # Check if user has active subscription
+    active_subscription = await get_active_subscription(user_id)
+    if not active_subscription:
         keyboard = [
             [InlineKeyboardButton("💰 Купить доступ", callback_data="buy")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await update.message.reply_text(
-            "❌ У вас нет активного аккаунта VPN.\n\n"
+            "❌ У вас нет активной подписки VPN.\n\n"
             "Нажмите 'Купить доступ', чтобы приобрести подписку.",
             reply_markup=reply_markup
         )
         return
     
     try:
-        # Get user account info from Marzban
-        marzban_username = user.get("marzban_username")
-        user_info = await marzban_service.get_user(marzban_username)
+        # Get subscription info and access keys
+        access_keys = await get_user_access_keys(user_id)
         
-        if user_info:
-            # Format used data
-            used = format_bytes(user_info.get("used_traffic", 0))
-            data_limit = format_bytes(user_info.get("data_limit", 0))
-            
-            # Format expiration date
-            expiry = format_expiry_date(user_info.get("expire", 0))
-            
-            # Get user status
-            status = "✅ Активен" if user_info.get("status") == "active" else "❌ Неактивен"
-            
-            keyboard = [
-                [InlineKeyboardButton("💰 Продлить доступ", callback_data="buy")]
-            ]
+        # Get all keys from Outline API for usage info
+        outline_keys = await outline_service.get_keys()
+        
+        # Calculate total traffic
+        total_traffic = 0
+        for key in access_keys:
+            key_id = key.get("key_id")
+            # Check if key exists in outline_keys (metrics data)
+            for outline_key in outline_keys.get("keys", []):
+                if str(outline_key.get("id")) == str(key_id):
+                    # Add usage data
+                    total_traffic += outline_key.get("metrics", {}).get("bytesTransferred", 0)
+        
+        # Get subscription plan info
+        plan_id = active_subscription.get("plan_id", "unknown")
+        plan = VPN_PLANS.get(plan_id, {})
+        
+        # Format used data
+        used = format_bytes(total_traffic)
+        
+        # Format expiration date
+        expiry = format_expiry_date(active_subscription.get("expires_at", 0))
+        
+        # Get subscription status
+        status = "✅ Активна" if active_subscription.get("status") == "active" else "❌ Неактивна"
+        
+        keyboard = [
+            [InlineKeyboardButton("💰 Продлить доступ", callback_data="buy")]
+        ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
             await update.message.reply_text(

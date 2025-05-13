@@ -29,8 +29,8 @@ async def init_database():
         client = MongoClient(
             MONGO_URI,
             serverSelectionTimeoutMS=5000,
-            ssl=True,
-            ssl_cert_reqs='CERT_NONE',  # Отключает проверку сертификата для решения SSL проблем
+            tls=True,
+            tlsAllowInvalidCertificates=True,  # Отключает проверку сертификата для решения SSL проблем
             connect=False,  # Lazy connection
             retryWrites=True,
             connectTimeoutMS=5000,
