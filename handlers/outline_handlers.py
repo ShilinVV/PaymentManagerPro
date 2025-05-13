@@ -1009,8 +1009,22 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Get current keys and check limit
         access_keys = await get_user_access_keys(user.id)
-        plan_id = subscription.get("plan_id")
-        plan = VPN_PLANS.get(plan_id, {})
+        
+        # Получаем план из подписки (совместимость с MongoDB и SQLAlchemy)
+        plan_id = None
+        if isinstance(subscription, dict):
+            # MongoDB возвращает словарь
+            plan_id = subscription.get("plan_id")
+        else:
+            # SQLAlchemy возвращает объект
+            plan_id = getattr(subscription, "plan_id", None)
+            
+        # Если plan_id не получен или некорректный, используем значение по умолчанию "monthly"
+        if not plan_id or plan_id not in VPN_PLANS:
+            logger.warning(f"Invalid or missing plan_id, using default. Got: {plan_id}")
+            plan_id = "monthly"
+            
+        plan = VPN_PLANS.get(plan_id, VPN_PLANS.get("monthly", {}))
         max_devices = plan.get("devices", 1)
         
         if len(access_keys) >= max_devices:
