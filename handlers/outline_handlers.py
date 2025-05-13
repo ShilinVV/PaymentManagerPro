@@ -772,7 +772,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "test_period":
         # Get user and check if test period already used
         db_user = await get_user(user.id)
-        test_used = db_user.get("test_used", False) if db_user else False
+        
+        # Обработка результатов из разных баз данных
+        test_used = False
+        if db_user:
+            if isinstance(db_user, dict):
+                # MongoDB возвращает словарь
+                test_used = db_user.get("test_used", False)
+            else:
+                # SQLAlchemy возвращает объект модели
+                test_used = getattr(db_user, "test_used", False)
         
         if test_used:
             message = (
@@ -859,15 +868,33 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Mark test period as used
         await update_user(user.id, {"test_used": True})
         
+        # Получаем дату истечения срока действия
+        expiry_date = datetime.now() + timedelta(days=test_plan["duration"])
+        if isinstance(new_subscription, dict):
+            expiry_date = new_subscription.get("expires_at", expiry_date)
+        else:
+            # SQLAlchemy объект
+            expiry_date = getattr(new_subscription, "expires_at", expiry_date)
+            
+        # Форматируем дату для отображения
+        expiry_str = format_expiry_date(expiry_date)
+        
+        # Форматируем URL ключа
+        access_url = ""
+        if isinstance(key, dict):
+            access_url = key.get("access_url", "")
+        else:
+            access_url = getattr(key, "access_url", "")
+        
         # Send success message with access key
         message = (
             f"*Тестовый период активирован!*\n\n"
             f"Вы получили бесплатный доступ к VPN на {test_plan['duration']} дня.\n\n"
             f"*Ваш ключ доступа:*\n"
-            f"{key.get('access_url')}\n\n"
+            f"{access_url}\n\n"
             f"Используйте этот ключ для подключения к VPN через приложение Outline.\n\n"
             f"*Важно:* Сохраните этот ключ или нажмите кнопку 'Мои ключи' для доступа к нему позже.\n\n"
-            f"*Срок действия:* до {format_expiry_date(new_subscription.get('expires_at'))}"
+            f"*Срок действия:* до {expiry_str}"
         )
         
         keyboard = [
@@ -1041,13 +1068,34 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         
+        # Получаем дату истечения срока действия и форматируем
+        expiry_date = datetime.now() + timedelta(days=30)  # Значение по умолчанию
+        if isinstance(subscription, dict):
+            expiry_date = subscription.get("expires_at", expiry_date)
+        else:
+            # SQLAlchemy объект
+            expiry_date = getattr(subscription, "expires_at", expiry_date)
+            
+        # Форматируем дату для отображения
+        expiry_str = format_expiry_date(expiry_date)
+        
+        # Получаем информацию о ключе
+        key_name = ""
+        access_url = ""
+        if isinstance(key, dict):
+            key_name = key.get("name", "Новый ключ")
+            access_url = key.get("access_url", "")
+        else:
+            key_name = getattr(key, "name", "Новый ключ")
+            access_url = getattr(key, "access_url", "")
+        
         # Send success message with access key
         message = (
             f"*Новый ключ доступа создан!*\n\n"
-            f"*Имя:* {key.get('name')}\n"
-            f"*Ключ:* `{key.get('access_url')}`\n\n"
+            f"*Имя:* {key_name}\n"
+            f"*Ключ:* `{access_url}`\n\n"
             f"Используйте этот ключ для подключения к VPN через приложение Outline.\n\n"
-            f"*Срок действия:* до {format_expiry_date(subscription.get('expires_at'))}"
+            f"*Срок действия:* до {expiry_str}"
         )
         
         keyboard = [
