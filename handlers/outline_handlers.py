@@ -56,8 +56,9 @@ async def create_vpn_access(user_id, subscription_id, plan_id, days, name=None):
     key_name = name or f"User {user_id}"
     key_data = await outline_service.create_key_with_expiration(days, key_name)
     
-    if "error" in key_data:
-        logger.error(f"Failed to create Outline key: {key_data['error']}")
+    if not key_data or (isinstance(key_data, dict) and "error" in key_data):
+        error_msg = key_data.get("error", "Unknown error") if isinstance(key_data, dict) else "Failed to create key"
+        logger.error(f"Failed to create Outline key: {error_msg}")
         return None
     
     # Save key to database
@@ -68,13 +69,29 @@ async def create_vpn_access(user_id, subscription_id, plan_id, days, name=None):
         "name": key_data.get("name"),
         "access_url": key_data.get("accessUrl"),
         "created_at": datetime.now(),
-        "plan_id": plan_id,
-        "expires_at": datetime.now() + timedelta(days=days)
+        "deleted": False
     }
     
-    saved_key = await create_access_key(access_key)
-    logger.info(f"Created VPN access key for user {user_id}, subscription {subscription_id}")
-    return saved_key
+    try:
+        saved_key = await create_access_key(access_key)
+        logger.info(f"Created VPN access key for user {user_id}, subscription {subscription_id}")
+        
+        # Для случая, когда create_access_key возвращает ORM-объект
+        if hasattr(saved_key, 'key_id') and not isinstance(saved_key, dict):
+            return {
+                "key_id": saved_key.key_id,
+                "name": saved_key.name,
+                "access_url": saved_key.access_url
+            }
+        return saved_key
+    except Exception as e:
+        logger.error(f"Failed to save access key to database: {e}")
+        # Всё равно возвращаем созданный ключ, чтобы пользователь мог им воспользоваться
+        return {
+            "key_id": key_data.get("id"),
+            "name": key_data.get("name"),
+            "access_url": key_data.get("accessUrl")
+        }
 
 async def check_subscription_expiry():
     """Check for expiring subscriptions and notify users"""
@@ -438,8 +455,32 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     user = update.effective_user
     
+    # Admin panel
+    if data == "admin":
+        if user.id not in ADMIN_IDS:
+            await query.edit_message_text("⛔ У вас нет доступа к этой команде.")
+            return
+        
+        keyboard = [
+            [InlineKeyboardButton("👥 Список пользователей", callback_data="admin_list_users")],
+            [InlineKeyboardButton("➕ Добавить пользователя", callback_data="admin_add_user")],
+            [InlineKeyboardButton("🗑️ Удалить пользователя", callback_data="admin_delete_user")],
+            [InlineKeyboardButton("📢 Рассылка", callback_data="admin_broadcast")],
+            [InlineKeyboardButton("📊 Статистика", callback_data="admin_stats")],
+            [InlineKeyboardButton("↩️ В главное меню", callback_data="back_to_main")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            "🛠️ <b>Панель администратора</b>\n\n"
+            "Выберите действие из списка ниже:",
+            reply_markup=reply_markup,
+            parse_mode="HTML"
+        )
+        return
+    
     # Main menu navigation
-    if data == "back_to_main":
+    elif data == "back_to_main":
         # Simulate /start command but edit message instead of sending new one
         welcome_message = (
             f"Привет, {user.first_name}! 👋\n\n"
@@ -763,15 +804,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         
+        # Создаем уникальный ID для подписки
+        import uuid
+        subscription_id = str(uuid.uuid4())
+        
         # Create subscription
         subscription_data = {
             "user_id": user.id,
+            "subscription_id": subscription_id,
             "plan_id": "test",
             "status": "active",
             "created_at": datetime.now(),
             "expires_at": datetime.now() + timedelta(days=test_plan["duration"]),
-            "price": 0,
-            "payment_id": None
+            "price_paid": 0
         }
         
         new_subscription = await create_subscription(subscription_data)
@@ -785,8 +830,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         
+        # Получаем ID подписки (может быть разный формат в зависимости от типа БД)
+        if isinstance(new_subscription, dict):
+            # MongoDB возвращает словарь
+            subscription_id = new_subscription.get("_id", subscription_id)
+        else:
+            # SQLAlchemy возвращает объект
+            subscription_id = getattr(new_subscription, "id", subscription_id)
+        
         # Create VPN access key
-        subscription_id = new_subscription.get("_id")
         key = await create_vpn_access(
             user.id, 
             subscription_id, 
@@ -945,11 +997,37 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         
-        # Create new key
-        subscription_id = subscription.get("_id")
-        remaining_days = (subscription.get("expires_at") - datetime.now()).days
-        if remaining_days < 1:
-            remaining_days = 1
+        # Получаем ID подписки (может быть разный формат в зависимости от типа БД)
+        if isinstance(subscription, dict):
+            # MongoDB возвращает словарь
+            subscription_id = subscription.get("_id")
+            expires_at = subscription.get("expires_at")
+        else:
+            # SQLAlchemy возвращает объект
+            subscription_id = getattr(subscription, "id", None)
+            expires_at = getattr(subscription, "expires_at", None)
+        
+        if not subscription_id:
+            await query.edit_message_text(
+                "Произошла ошибка при получении информации о подписке. Пожалуйста, попробуйте позже.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("↩️ В главное меню", callback_data="back_to_main")
+                ]])
+            )
+            return
+        
+        # Вычисляем оставшиеся дни
+        remaining_days = 30  # Значение по умолчанию, если не сможем рассчитать
+        if expires_at:
+            if isinstance(expires_at, str):
+                try:
+                    expires_at = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+                except (ValueError, TypeError):
+                    pass
+            
+            if isinstance(expires_at, datetime):
+                delta = expires_at - datetime.now()
+                remaining_days = max(delta.days, 1)  # Минимум 1 день
             
         key_name = f"Device {len(access_keys) + 1} - {user.first_name}"
         key = await create_vpn_access(user.id, subscription_id, plan_id, remaining_days, key_name)
