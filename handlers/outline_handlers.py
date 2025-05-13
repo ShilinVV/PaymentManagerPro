@@ -834,6 +834,45 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     # Create key
+    elif data.startswith("delete_key_"):
+        # Extract key ID from callback data
+        key_id = data.replace("delete_key_", "")
+        
+        # Get access key
+        key = await get_access_key(key_id)
+        
+        if not key:
+            await query.edit_message_text(
+                "⚠️ Ключ не найден или уже был удален.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("↩️ Назад к списку ключей", callback_data="keys")]
+                ])
+            )
+            return
+        
+        try:
+            # Delete key in Outline
+            await outline_service.delete_key(key_id)
+            
+            # Update status in database
+            await update_access_key(key_id, {"deleted": True, "deleted_at": datetime.now()})
+            
+            # Confirm deletion
+            await query.edit_message_text(
+                "✅ Ключ успешно удален!",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("↩️ Назад к списку ключей", callback_data="keys")]
+                ])
+            )
+        except Exception as e:
+            logger.error(f"Error deleting key {key_id}: {e}")
+            await query.edit_message_text(
+                "❌ Ошибка при удалении ключа. Пожалуйста, попробуйте позже.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("↩️ Назад к списку ключей", callback_data="keys")]
+                ])
+            )
+    
     elif data.startswith("show_key_"):
         # Extract key ID from callback data
         key_id = data.replace("show_key_", "")
@@ -864,6 +903,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Create keyboard
         keyboard = [
+            [InlineKeyboardButton("🗑️ Удалить ключ", callback_data=f"delete_key_{key_id}")],
             [InlineKeyboardButton("↩️ Назад к списку ключей", callback_data="keys")],
             [InlineKeyboardButton("📱 Инструкция по подключению", callback_data="help")]
         ]
