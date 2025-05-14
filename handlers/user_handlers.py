@@ -338,6 +338,10 @@ async def payment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 raise ValueError("Failed to create subscription record")
             logger.info(f"🔶 PAYMENT HANDLER: Subscription created successfully: {subscription.id}")
             
+            # Деактивировать предыдущие ключи доступа пользователя
+            logger.info(f"🔶 PAYMENT HANDLER: Deactivating previous access keys for user {user.id}")
+            await db.deactivate_user_access_keys(user.id)
+            
             # Create VPN keys
             device_limit = plan.get('devices', 1)
             success_keys = []

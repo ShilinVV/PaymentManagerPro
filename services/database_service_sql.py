@@ -107,6 +107,32 @@ async def get_all_users():
     finally:
         session.close()
 
+async def deactivate_user_subscriptions(user_id):
+    """Деактивировать все активные подписки пользователя"""
+    session = get_session()
+    try:
+        # Найти все активные подписки пользователя
+        subscriptions = session.query(Subscription).filter(
+            and_(
+                Subscription.user_id == user_id,
+                Subscription.status == "active"
+            )
+        ).all()
+        
+        # Деактивировать каждую подписку
+        for subscription in subscriptions:
+            subscription.status = "inactive"
+            logger.info(f"Deactivated subscription {subscription.subscription_id} for user {user_id}")
+        
+        session.commit()
+        return True
+    except SQLAlchemyError as e:
+        session.rollback()
+        logger.error(f"Error deactivating subscriptions: {e}")
+        return False
+    finally:
+        session.close()
+
 async def create_subscription(subscription_data):
     """Create a new subscription in the database"""
     session = get_session()
@@ -123,6 +149,11 @@ async def create_subscription(subscription_data):
             else:
                 logger.error(f"User with telegram_id {subscription_data['telegram_id']} not found")
                 return None
+        
+        # Деактивировать предыдущие подписки пользователя
+        if subscription_data.get("status", "active") == "active":
+            await deactivate_user_subscriptions(subscription_data["user_id"])
+            logger.info(f"Deactivated previous subscriptions for user {subscription_data['user_id']}")
         
         # Создаем новую подписку
         new_subscription = Subscription(
@@ -332,6 +363,41 @@ async def update_access_key(key_id, update_data):
     except SQLAlchemyError as e:
         session.rollback()
         logger.error(f"Error updating access key: {e}")
+        return False
+    finally:
+        session.close()
+
+async def deactivate_user_access_keys(user_id):
+    """Деактивировать все ключи доступа пользователя"""
+    session = get_session()
+    try:
+        # Находим пользователя по telegram_id, если передан telegram_id вместо user_id
+        if isinstance(user_id, int) and user_id > 1000000:  # Предполагаем, что это telegram_id
+            user = session.query(User).filter_by(telegram_id=user_id).first()
+            if user:
+                user_id = user.id
+            else:
+                logger.error(f"User with telegram_id {user_id} not found")
+                return False
+        
+        # Получаем все неудаленные ключи доступа пользователя
+        keys = session.query(AccessKey).filter(
+            and_(
+                AccessKey.user_id == user_id,
+                AccessKey.deleted == False
+            )
+        ).all()
+        
+        # Помечаем каждый ключ как удаленный
+        for key in keys:
+            key.deleted = True
+            logger.info(f"Deactivated access key {key.key_id} for user {user_id}")
+        
+        session.commit()
+        return True
+    except SQLAlchemyError as e:
+        session.rollback()
+        logger.error(f"Error deactivating access keys: {e}")
         return False
     finally:
         session.close()
