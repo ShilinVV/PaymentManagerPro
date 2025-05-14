@@ -20,8 +20,9 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Check if user exists in database, if not, create them
     user = await db.get_user(user_id)
-    if not user:
-        await db.create_user({
+    is_new_user = not user
+    if is_new_user:
+        user = await db.create_user({
             "telegram_id": user_id,
             "username": username,
             "first_name": update.effective_user.first_name,
@@ -29,28 +30,123 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "created_at": datetime.now(),
             "is_premium": False
         })
+        logger.info(f"Новый пользователь зарегистрирован: {user_id}, username: {username}")
     
+    # Создаем клавиатуру с кнопками
     keyboard = [
-        [InlineKeyboardButton("💰 Купить доступ", callback_data="buy")],
-        [InlineKeyboardButton("🔄 Мой статус", callback_data="status")]
+        [
+            InlineKeyboardButton("💰 Купить доступ", callback_data="buy"), 
+            InlineKeyboardButton("🔄 Статус", callback_data="status")
+        ],
+        [
+            InlineKeyboardButton("ℹ️ Информация", callback_data="info"), 
+            InlineKeyboardButton("❓ Помощь", callback_data="help")
+        ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await update.message.reply_text(
-        f"👋 Привет, {update.effective_user.first_name}!\n\n"
-        "🔐 Добро пожаловать в VPN Bot!\n\n"
-        "Выберите действие из меню ниже:",
-        reply_markup=reply_markup
-    )
+    # Формируем приветственное сообщение
+    if is_new_user:
+        message = (
+            f"👋 Привет, {update.effective_user.first_name}!\n\n"
+            f"🆔 Ваш ID: {user_id}\n\n"
+            "🔐 Добро пожаловать в VPN Bot!\n"
+            "Вы успешно зарегистрированы в системе.\n\n"
+            "Что вы хотите сделать?"
+        )
+    else:
+        message = (
+            f"👋 С возвращением, {update.effective_user.first_name}!\n\n"
+            "🔐 Добро пожаловать в VPN Bot!\n\n"
+            "Что вы хотите сделать?"
+        )
+    
+    # Устанавливаем команды бота в "бургер-меню"
+    commands = [
+        ("start", "Перезапустить бота"),
+        ("status", "Статус подписки"),
+        ("plans", "Тарифы"),
+        ("help", "Помощь")
+    ]
+    
+    try:
+        await context.bot.set_my_commands(commands)
+    except Exception as e:
+        logger.error(f"Ошибка при установке команд бота: {e}")
+    
+    # Отправляем сообщение
+    await update.message.reply_text(message, reply_markup=reply_markup)
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler for button callbacks"""
     query = update.callback_query
     await query.answer()
     
-    # Обработка кнопки "Скопировать ключ"
+    # Получаем данные из кнопки
     data = query.data
-    if data.startswith("copy_key_"):
+    
+    # Обработка кнопки "Вернуться в главное меню"
+    if data == "back_to_main":
+        # Создаем клавиатуру с кнопками
+        keyboard = [
+            [
+                InlineKeyboardButton("💰 Купить доступ", callback_data="buy"), 
+                InlineKeyboardButton("🔄 Статус", callback_data="status")
+            ],
+            [
+                InlineKeyboardButton("ℹ️ Информация", callback_data="info"), 
+                InlineKeyboardButton("❓ Помощь", callback_data="help")
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        # Отправляем сообщение
+        await query.edit_message_text(
+            f"👋 Здравствуйте, {query.from_user.first_name}!\n\n"
+            "🔐 Добро пожаловать в VPN Bot!\n\n"
+            "Что вы хотите сделать?",
+            reply_markup=reply_markup
+        )
+        return
+    
+    # Обработка кнопки "Информация о тарифах"
+    elif data == "info":
+        # Информация о тарифах
+        plans_info = ""
+        for plan_id, plan in VPN_PLANS.items():
+            days = plan.get("days", 0)
+            price = plan.get("price", 0)
+            
+            if plan_id == "test":
+                plans_info += f"📌 *Тестовый период*: {days} дня бесплатно\n"
+            else:
+                plans_info += f"📌 *{plan.get('name', 'План')}*: {days} дней за {price} ₽\n"
+        
+        # Создаем клавиатуру с кнопками
+        keyboard = [
+            [InlineKeyboardButton("💰 Купить доступ", callback_data="buy")],
+            [InlineKeyboardButton("↩️ Вернуться в главное меню", callback_data="back_to_main")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        # Отправляем сообщение
+        await query.edit_message_text(
+            "ℹ️ *Информация о тарифах*\n\n"
+            f"{plans_info}\n"
+            "Выберите тариф через кнопку 'Купить доступ'.\n\n"
+            "При покупке любого тарифа вы получаете:\n"
+            "✅ Стабильное соединение\n"
+            "✅ Высокую скорость\n"
+            "✅ Анонимность и безопасность\n"
+            "✅ Поддержку всех устройств\n"
+            "✅ Простую настройку",
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
+        )
+        return
+    
+    # Обработка кнопки "Скопировать ключ"
+    elif data.startswith("copy_key_"):
         callback_id = query.data
         access_url = None
         
@@ -431,177 +527,31 @@ async def payment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ]])
             )
     
-    elif data.startswith("check_"):
-        payment_id = data.replace("check_", "")
-        
-        try:
-            # Отображаем индикатор загрузки
-            await query.answer("Проверяем статус платежа...")
-            
-            # Проверяем статус платежа
-            payment_status = await payment_service.check_payment_status(payment_id)
-            
-            if payment_status == "succeeded" or payment_status == "waiting_for_capture":
-                # Обрабатываем успешный платеж
-                payment_result = await payment_service.process_payment(payment_id)
-                
-                if payment_result:
-                    # Получаем данные пользователя и платежа
-                    user_id = query.from_user.id
-                    user = await db.get_user(user_id)
-                    payment = await db.get_payment(payment_id)
-                    
-                    if not payment:
-                        raise ValueError(f"Payment {payment_id} not found")
-                    
-                    # Получаем план и подписку
-                    subscription = await db.get_subscription(payment.subscription_id)
-                    if not subscription:
-                        raise ValueError(f"Subscription {payment.subscription_id} not found")
-                        
-                    plan_id = subscription.plan_id
-                    plan = VPN_PLANS.get(plan_id)
-                    if not plan:
-                        raise ValueError(f"Plan {plan_id} not found")
-                    
-                    # Импортируем функции для работы с VPN ключами
-                    from handlers.outline_handlers import create_vpn_access, extend_vpn_access, get_user_active_keys
-                    
-                    # Проверяем, есть ли у пользователя активные ключи
-                    active_keys = await get_user_active_keys(user_id)
-                    device_limit = plan.get('devices', 1)
-                    
-                    # Если у пользователя уже есть активные ключи, продлеваем их
-                    keys_created = 0
-                    if active_keys and len(active_keys) > 0:
-                        # Продлеваем существующие ключи до лимита устройств
-                        keys_extended = 0
-                        for key in active_keys:
-                            if keys_extended >= device_limit:
-                                break
-                                
-                            # Формируем имя для ключа
-                            device_name = f"Device {keys_extended+1}" if keys_extended > 0 else "Main device"
-                            key_name = f"{user.username or f'User_{user_id}'} - {device_name}"
-                            
-                            # Продлеваем ключ
-                            updated_key = await extend_vpn_access(
-                                key_id=key.key_id,
-                                user_id=user_id,
-                                subscription_id=subscription.subscription_id,
-                                plan_id=plan_id,
-                                days=plan['duration'],
-                                name=key_name
-                            )
-                            
-                            if updated_key:
-                                keys_extended += 1
-                                keys_created += 1
-                        
-                        # Если нужно больше ключей, создаем новые
-                        for i in range(keys_extended, device_limit):
-                            device_name = f"Device {i+1}" if i > 0 else "Main device"
-                            key_name = f"{user.username or f'User_{user_id}'} - {device_name}"
-                            
-                            # Создаем новый ключ
-                            new_key = await create_vpn_access(
-                                user_id=user_id,
-                                subscription_id=subscription.subscription_id,
-                                plan_id=plan_id,
-                                days=plan['duration'],
-                                name=key_name
-                            )
-                            
-                            if new_key:
-                                keys_created += 1
-                    else:
-                        # У пользователя нет ключей, создаем новые
-                        for i in range(device_limit):
-                            device_name = f"Device {i+1}" if i > 0 else "Main device"
-                            key_name = f"{user.username or f'User_{user_id}'} - {device_name}"
-                            
-                            # Создаем ключ доступа
-                            new_key = await create_vpn_access(
-                                user_id=user_id,
-                                subscription_id=subscription.subscription_id,
-                                plan_id=plan_id,
-                                days=plan['duration'],
-                                name=key_name
-                            )
-                            
-                            if new_key:
-                                keys_created += 1
-                    
-                    # Показываем сообщение об успехе
-                    await query.edit_message_text(
-                        "✅ <b>Доступ к VPN успешно активирован!</b>\n\n"
-                        f"🔹 Тариф: <b>{plan['name']}</b>\n"
-                        f"⏳ Срок действия: {plan['duration']} дней\n"
-                        f"📱 Создано/продлено ключей: {keys_created}\n\n"
-                        f"Используйте команду /status или нажмите кнопку ниже, "
-                        f"чтобы получить ваши ключи доступа.",
-                        reply_markup=InlineKeyboardMarkup([
-                            [InlineKeyboardButton("🔑 Мои ключи", callback_data="status")],
-                            [InlineKeyboardButton("↩️ Главное меню", callback_data="back_to_main")]
-                        ]),
-                        parse_mode="HTML"
-                    )
-                else:
-                    # Не удалось обработать платеж
-                    await query.edit_message_text(
-                        "❓ <b>Ошибка обработки платежа</b>\n\n"
-                        "Платеж получен, но возникла ошибка при активации VPN.\n"
-                        "Пожалуйста, обратитесь к администратору.",
-                        reply_markup=InlineKeyboardMarkup([[
-                            InlineKeyboardButton("↩️ Назад", callback_data="back_to_main")
-                        ]]),
-                        parse_mode="HTML"
-                    )
-            elif payment_status == "pending" or payment_status == "waiting_for_confirmation":
-                # Платеж еще не подтвержден
-                await query.edit_message_text(
-                    "⏳ <b>Ожидание подтверждения платежа...</b>\n\n"
-                    "Платеж еще обрабатывается. Это может занять несколько минут.\n\n"
-                    "Если вы уже оплатили, подождите немного и проверьте снова.",
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("🔄 Проверить снова", callback_data=f"check_{payment_id}")],
-                        [InlineKeyboardButton("↩️ Назад", callback_data="back_to_main")]
-                    ]),
-                    parse_mode="HTML"
-                )
-            else:
-                # Ошибка платежа или отмена
-                await query.edit_message_text(
-                    "❌ <b>Платеж не подтвержден</b>\n\n"
-                    f"Статус платежа: {payment_status}\n\n"
-                    "Возможно, платеж был отменен или произошла ошибка. "
-                    "Попробуйте снова или выберите другой способ оплаты.",
-                    reply_markup=InlineKeyboardMarkup([[
-                        InlineKeyboardButton("↩️ Назад к тарифам", callback_data="buy")
-                    ]]),
-                    parse_mode="HTML"
-                )
-                
-        except Exception as e:
-            logger.error(f"Payment check error: {e}")
-            await query.edit_message_text(
-                "❌ <b>Ошибка при проверке платежа</b>\n\n"
-                "Не удалось проверить статус платежа. Попробуйте позже или обратитесь к администратору.",
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("↩️ Назад", callback_data="back_to_main")
-                ]]),
-                parse_mode="HTML"
-            )
-
+    # Обработчик check_ больше не нужен, так как теперь используем автоматические вебхуки
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler for the /status command"""
     user_id = update.effective_user.id
+    
+    # Получаем данные о пользователе
+    user = await db.get_user(user_id)
+    if not user:
+        # Если пользователь не найден, регистрируем его
+        user = await db.create_user({
+            "telegram_id": user_id,
+            "username": update.effective_user.username or f"user_{user_id}",
+            "first_name": update.effective_user.first_name,
+            "last_name": update.effective_user.last_name,
+            "created_at": datetime.now(),
+            "is_premium": False
+        })
+        logger.info(f"Пользователь зарегистрирован при запросе статуса: {user_id}")
     
     # Create and trigger the status button handler
     keyboard = [[InlineKeyboardButton("🔄 Мой статус", callback_data="status")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     message = await update.message.reply_text(
+        f"🆔 Ваш ID: {user_id}\n\n"
         "📊 Загрузка статуса...",
         reply_markup=reply_markup
     )
