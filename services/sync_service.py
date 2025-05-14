@@ -36,20 +36,36 @@ async def sync_outline_keys():
         users = await get_all_users()
         
         for user in users:
-            # Получаем все ключи пользователя из базы данных
-            user_keys = await get_user_access_keys(user["id"])
-            
-            for key in user_keys:
-                key_id = key.get("key_id")
+            try:
+                # Получаем ID пользователя (поддержка как словарей, так и объектов)
+                if hasattr(user, 'id'):
+                    user_id = user.id
+                else:
+                    user_id = user["id"]
                 
-                # Проверяем, существует ли ключ на сервере Outline
-                if key_id not in outline_keys and not key.get("deleted", False):
-                    # Ключ удален на сервере Outline, но не в базе данных
-                    logger.info(f"Ключ {key_id} не существует на сервере Outline, помечаем как удаленный")
-                    await update_access_key(key_id, {
-                        "deleted": True,
-                        "updated_at": datetime.now()
-                    })
+                # Получаем все ключи пользователя из базы данных
+                user_keys = await get_user_access_keys(user_id)
+                
+                for key in user_keys:
+                    # Получаем key_id (поддержка как словарей, так и объектов)
+                    if hasattr(key, 'key_id'):
+                        key_id = key.key_id
+                        is_deleted = getattr(key, 'deleted', False)
+                    else:
+                        key_id = key.get("key_id")
+                        is_deleted = key.get("deleted", False)
+                    
+                    # Проверяем, существует ли ключ на сервере Outline
+                    if key_id not in outline_keys and not is_deleted:
+                        # Ключ удален на сервере Outline, но не в базе данных
+                        logger.info(f"Ключ {key_id} не существует на сервере Outline, помечаем как удаленный")
+                        await update_access_key(key_id, {
+                            "deleted": True,
+                            "updated_at": datetime.now()
+                        })
+            except Exception as e:
+                logger.error(f"Ошибка при обработке пользователя: {e}")
+                continue
         
         logger.info("Синхронизация ключей завершена успешно")
         return True
@@ -87,17 +103,39 @@ async def get_server_stats():
         
         # Получаем статистику пользователей
         users = await get_all_users()
-        stats["users_count"] = len(users)
         
-        # Считаем активные ключи
-        active_keys = 0
-        for user in users:
-            user_keys = await get_user_access_keys(user["id"])
-            for key in user_keys:
-                if not key.get("deleted", False):
-                    active_keys += 1
-        
-        stats["active_keys_count"] = active_keys
+        # Проверяем, что users не None
+        if users:
+            stats["users_count"] = len(users)
+            
+            # Считаем активные ключи
+            active_keys = 0
+            for user in users:
+                try:
+                    # Получаем ID пользователя (поддержка как словарей, так и объектов)
+                    if hasattr(user, 'id'):
+                        user_id = user.id
+                    else:
+                        user_id = user["id"]
+                    
+                    # Получаем ключи пользователя
+                    user_keys = await get_user_access_keys(user_id)
+                    
+                    if user_keys:
+                        for key in user_keys:
+                            # Проверяем статус удаления ключа (поддержка как словарей, так и объектов)
+                            if hasattr(key, 'deleted'):
+                                is_deleted = key.deleted
+                            else:
+                                is_deleted = key.get("deleted", False)
+                                
+                            if not is_deleted:
+                                active_keys += 1
+                except Exception as e:
+                    logger.error(f"Ошибка при обработке пользователя для статистики: {e}")
+                    continue
+            
+            stats["active_keys_count"] = active_keys
         
         return stats
     except Exception as e:

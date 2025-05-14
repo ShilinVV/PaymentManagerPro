@@ -6,6 +6,7 @@ from bson import ObjectId
 
 from config import ADMIN_IDS, VPN_PLANS
 from services.outline_service import OutlineService
+from utils.helpers import format_bytes
 from services.database_service import (
     get_user,
     get_all_users,
@@ -207,43 +208,59 @@ async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data["admin_state"] = "waiting_for_broadcast"
     
     elif data == "admin_stats":
-        # Get statistics
+        # Show server statistics
         try:
-            # Get all users from database
-            all_users = await get_all_users()
+            # Используем сервис синхронизации для получения статистики
+            from services.sync_service import get_server_stats
+            from utils.helpers import format_bytes
             
-            # Get all keys from Outline API
-            outline_keys = await outline_service.get_keys()
-            server_info = await outline_service.get_server_info()
+            stats = await get_server_stats()
             
-            total_db_users = len(all_users) if all_users else 0
+            # Получаем основные данные из статистики
+            users_count = stats.get("users_count", 0)
+            active_keys_count = stats.get("active_keys_count", 0)
+            total_keys_count = stats.get("total_keys_count", 0)
+            
+            # Получаем информацию о сервере
+            server_info = stats.get("server_info", {})
+            server_name = server_info.get("name", "Unknown")
+            server_version = server_info.get("version", "Unknown")
+            
+            # Подсчитываем общее использование данных
+            data_usage = stats.get("data_usage", {})
+            total_bytes = sum(data_usage.values()) if data_usage else 0
             
             # Count active users (users with active subscriptions)
-            active_users = sum(1 for user in all_users if user.get("has_active_subscription", False)) if all_users else 0
+            all_users = await get_all_users()
+            active_users = 0
             
-            # Calculate total traffic usage
-            total_traffic = 0
-            for key in outline_keys.get("keys", []):
-                total_traffic += key.get("metrics", {}).get("bytesTransferred", 0)
+            if all_users:
+                for user in all_users:
+                    if hasattr(user, 'has_active_subscription'):
+                        if user.has_active_subscription:
+                            active_users += 1
+                    elif user.get("has_active_subscription", False):
+                        active_users += 1
             
-            stats_text = "📊 <b>Статистика:</b>\n\n"
-            stats_text += f"👥 Всего пользователей: {total_db_users}\n"
-            stats_text += f"✅ Активных подписок: {active_users}\n"
-            stats_text += f"🔑 Всего ключей: {len(outline_keys.get('keys', []))}\n"
-            stats_text += f"📈 Общий трафик: {format_bytes(total_traffic)}\n"
+            # Форматируем статистику
+            stats_text = "📊 <b>Статистика сервера</b>\n\n"
+            stats_text += f"👥 Пользователей: {users_count}\n"
+            stats_text += f"👤 Активных подписок: {active_users}\n"
+            stats_text += f"🔑 Активных ключей: {active_keys_count}\n"
+            stats_text += f"🔐 Всего ключей в Outline: {total_keys_count}\n"
+            stats_text += f"📊 Использовано данных: {format_bytes(total_bytes)}\n"
+            stats_text += f"📝 Имя сервера: {server_name}\n"
+            stats_text += f"📌 Версия: {server_version}\n"
             
-            # Добавляем информацию о сервере, если она доступна
-            if server_info:
-                server_name = server_info.get("name", "Outline VPN")
-                server_version = server_info.get("version", "Unknown")
-                stats_text += f"\n🖥️ Сервер: {server_name}\n"
-                stats_text += f"📌 Версия: {server_version}\n"
+            # Добавляем кнопку синхронизации ключей
+            keyboard = [
+                [InlineKeyboardButton("🔄 Синхронизировать ключи", callback_data="admin_sync_keys")],
+                [InlineKeyboardButton("↩️ Назад", callback_data="admin_back")]
+            ]
             
             await query.edit_message_text(
                 stats_text,
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("↩️ Назад", callback_data="admin_back")
-                ]]),
+                reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode="HTML"
             )
         except Exception as e:
@@ -255,6 +272,54 @@ async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                 ]])
             )
     
+    elif data == "admin_sync_keys":
+        # Синхронизация ключей
+        try:
+            # Отображаем сообщение о начале синхронизации
+            await query.edit_message_text(
+                "🔄 <b>Синхронизация ключей...</b>\n\n"
+                "Пожалуйста, подождите.",
+                parse_mode="HTML"
+            )
+            
+            # Импортируем функцию синхронизации
+            from services.sync_service import sync_outline_keys
+            
+            # Запускаем синхронизацию
+            result = await sync_outline_keys()
+            
+            # Проверяем результат
+            if result:
+                # Синхронизация успешна, получаем обновленную статистику
+                await query.edit_message_text(
+                    "✅ <b>Синхронизация успешно завершена!</b>\n\n"
+                    "Обновляем статистику...",
+                    parse_mode="HTML"
+                )
+                
+                # Вызываем обработчик статистики через callback_data
+                await query.answer()
+                return await admin_button_handler(update, context)
+            else:
+                # Ошибка синхронизации
+                await query.edit_message_text(
+                    "❌ <b>Ошибка синхронизации ключей.</b>\n\n"
+                    "Проверьте журнал ошибок для получения дополнительной информации.",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("↩️ Назад к статистике", callback_data="admin_stats")
+                    ]]),
+                    parse_mode="HTML"
+                )
+        except Exception as e:
+            logger.error(f"Error synchronizing keys: {e}")
+            await query.edit_message_text(
+                f"❌ <b>Ошибка при синхронизации ключей:</b>\n\n{str(e)}",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("↩️ Назад к статистике", callback_data="admin_stats")
+                ]]),
+                parse_mode="HTML"
+            )
+            
     elif data == "admin_back":
         # Return to admin panel
         keyboard = [
