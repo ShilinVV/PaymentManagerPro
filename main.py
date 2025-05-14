@@ -12,12 +12,16 @@ from dotenv import load_dotenv
 # Import Flask app for gunicorn
 from app import app
 
-from handlers.outline_handlers import (
+from handlers.user_handlers import (
     start_command, 
     button_handler, 
     status_command,
     plans_command,
     help_command,
+    buy_handler,
+    payment_handler
+)
+from handlers.outline_handlers import (
     keys_command,
     check_subscription_expiry
 )
@@ -91,6 +95,8 @@ async def main():
     
     # Callback query handlers
     application.add_handler(CallbackQueryHandler(admin_button_handler, pattern="^admin_"))
+    application.add_handler(CallbackQueryHandler(buy_handler, pattern="^buy_"))
+    application.add_handler(CallbackQueryHandler(payment_handler, pattern="^(pay_|check_)"))
     application.add_handler(CallbackQueryHandler(button_handler))
     
     # Start the Bot
