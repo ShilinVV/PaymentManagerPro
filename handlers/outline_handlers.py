@@ -510,6 +510,151 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    # Test period
+    elif data == "test_period":
+        # Get user and check if test period already used
+        db_user = await get_user(user.id)
+        
+        # Обработка результатов из разных баз данных
+        test_used = False
+        if db_user:
+            if isinstance(db_user, dict):
+                # MongoDB возвращает словарь
+                test_used = db_user.get("test_used", False)
+            else:
+                # SQLAlchemy возвращает объект модели
+                test_used = getattr(db_user, "test_used", False)
+        
+        if test_used:
+            message = (
+                "Вы уже использовали бесплатный тестовый период.\n\n"
+                "Выберите тарифный план для продолжения использования VPN:"
+            )
+            
+            keyboard = [
+                [InlineKeyboardButton("💳 Тарифные планы", callback_data="plans")],
+                [InlineKeyboardButton("↩️ В главное меню", callback_data="back_to_main")]
+            ]
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                message,
+                reply_markup=reply_markup
+            )
+            return
+        
+        # Get test plan
+        test_plan = VPN_PLANS.get("test")
+        if not test_plan:
+            await query.edit_message_text(
+                "Тестовый период временно недоступен. Пожалуйста, выберите один из наших тарифных планов.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("💳 Тарифные планы", callback_data="plans")
+                ]])
+            )
+            return
+        
+        # Создаем уникальный ID для подписки
+        import uuid
+        subscription_id = str(uuid.uuid4())
+        
+        # Create subscription
+        subscription_data = {
+            "user_id": user.id,
+            "subscription_id": subscription_id,
+            "plan_id": "test",
+            "status": "active",
+            "created_at": datetime.now(),
+            "expires_at": datetime.now() + timedelta(days=test_plan["duration"]),
+            "price_paid": 0
+        }
+        
+        new_subscription = await create_subscription(subscription_data)
+        
+        if not new_subscription:
+            await query.edit_message_text(
+                "Произошла ошибка при активации тестового периода. Пожалуйста, попробуйте позже.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("↩️ В главное меню", callback_data="back_to_main")
+                ]])
+            )
+            return
+        
+        # Получаем ID подписки (может быть разный формат в зависимости от типа БД)
+        if isinstance(new_subscription, dict):
+            # MongoDB возвращает словарь
+            subscription_id = new_subscription.get("_id", subscription_id)
+        else:
+            # SQLAlchemy возвращает объект
+            subscription_id = getattr(new_subscription, "id", subscription_id)
+        
+        # Create VPN access key
+        key = await create_vpn_access(
+            user.id, 
+            subscription_id, 
+            "test", 
+            test_plan["duration"], 
+            f"Test - {user.first_name}"
+        )
+        
+        if not key:
+            await query.edit_message_text(
+                "Произошла ошибка при создании ключа доступа. Пожалуйста, попробуйте позже.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("↩️ В главное меню", callback_data="back_to_main")
+                ]])
+            )
+            return
+        
+        # Mark test period as used
+        await update_user(user.id, {"test_used": True})
+        
+        # Получаем дату истечения срока действия
+        expiry_date = datetime.now() + timedelta(days=test_plan["duration"])
+        if isinstance(new_subscription, dict):
+            expiry_date = new_subscription.get("expires_at", expiry_date)
+        else:
+            # SQLAlchemy объект
+            expiry_date = getattr(new_subscription, "expires_at", expiry_date)
+            
+        # Форматируем дату для отображения
+        expiry_str = format_expiry_date(expiry_date)
+        
+        # Форматируем URL ключа
+        access_url = ""
+        if isinstance(key, dict):
+            access_url = key.get("access_url", "")
+        else:
+            access_url = getattr(key, "access_url", "")
+        
+        # Send success message with access key
+        message = (
+            f"*Тестовый период активирован!*\n\n"
+            f"Вы получили бесплатный доступ к VPN на {test_plan['duration']} дня.\n\n"
+            f"*Ваш ключ доступа:*\n"
+            f"{access_url}\n\n"
+            f"Используйте этот ключ для подключения к VPN через приложение Outline.\n\n"
+            f"*Важно:* По истечении тестового периода ключ будет деактивирован. "
+            f"Для продолжения использования необходимо приобрести один из платных тарифов.\n\n"
+            f"*Срок действия:* до {expiry_str}"
+        )
+        
+        keyboard = [
+            [InlineKeyboardButton("💳 Тарифные планы", callback_data="plans")],
+            [InlineKeyboardButton("📱 Как подключиться", callback_data="help")],
+            [InlineKeyboardButton("↩️ В главное меню", callback_data="back_to_main")]
+        ]
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            message,
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
+        )
+        return
+    
     # Plans callback
     elif data == "plans":
         message = "*Доступные тарифные планы:*\n\n"
