@@ -55,6 +55,10 @@ async def create_payment(user_id, plan_id, return_url=None):
                 raise ValueError(f"Failed to create user record for ID {user_id}")
             logger.info(f"User created successfully: {user.telegram_id}, database ID: {user.id}")
         
+        # Get the internal user ID (not telegram_id)
+        db_user_id = user.id
+        logger.info(f"Using database user ID: {db_user_id} for subscription")
+        
         # Skip payment flow for test plan, free plans, or when troubleshooting
         if plan_id == "test" or amount <= 0 or is_test:
             logger.info(f"Test plan selected, skipping payment for user {user_id}")
