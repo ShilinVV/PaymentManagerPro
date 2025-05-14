@@ -21,15 +21,22 @@ def format_bytes(size_bytes):
     
     return f"{size_bytes:.2f} {size_name[i]}"
 
-def format_expiry_date(timestamp):
+def format_expiry_date(timestamp_or_date):
     """
-    Format Unix timestamp to human-readable date
+    Format Unix timestamp or datetime object to human-readable date
     """
-    if not timestamp:
+    if not timestamp_or_date:
         return "Бессрочно"
     
-    # Convert to datetime
-    date = datetime.fromtimestamp(int(timestamp))
+    # Convert to datetime if timestamp
+    if isinstance(timestamp_or_date, (int, float, str)):
+        try:
+            date = datetime.fromtimestamp(int(timestamp_or_date))
+        except (ValueError, TypeError):
+            return "Неверный формат даты"
+    else:
+        # Assume it's already a datetime object
+        date = timestamp_or_date
     
     # If expired
     if date < datetime.now():

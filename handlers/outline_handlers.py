@@ -510,7 +510,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 valid_keys.append(key)
         
         # Format expiry date
-        expires_at = subscription.get("expires_at")
+        expires_at = None
+        if isinstance(subscription, dict):
+            expires_at = subscription.get("expires_at")
+        else:
+            expires_at = getattr(subscription, "expires_at", None)
+            
         expiry_str = format_expiry_date(expires_at) if expires_at else "Неизвестно"
         
         message = (
@@ -672,11 +677,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Mark test period as used
         await update_user(user.id, {"test_used": True})
         
-        # Обновляем пользователя в локальной переменной
-        if isinstance(db_user, dict):
-            db_user["test_used"] = True
-        else:
-            db_user.test_used = True
+        # Обновляем пользователя в локальной переменной только если он существует
+        if db_user:
+            if isinstance(db_user, dict):
+                db_user["test_used"] = True
+            else:
+                db_user.test_used = True
         
         # Получаем дату истечения срока действия
         expiry_date = datetime.now() + timedelta(days=test_plan["duration"])
