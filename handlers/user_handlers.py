@@ -88,20 +88,38 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.data == "buy":
         # Show available plans
         keyboard = []
-        for plan_id, plan in VPN_PLANS.items():
+        
+        # Фильтруем и сортируем планы по длительности (кроме тестового)
+        regular_plans = {k: v for k, v in VPN_PLANS.items() if k != "test"}
+        sorted_plans = sorted(regular_plans.items(), key=lambda x: x[1]['duration'])
+        
+        # Добавляем тарифы в порядке возрастания длительности
+        for plan_id, plan in sorted_plans:
+            # Форматируем название с учетом скидки
+            discount_text = f" (-{plan.get('discount')})" if plan.get('discount') else ""
             keyboard.append([InlineKeyboardButton(
-                f"{plan['name']} - {plan['price']} ₽", 
+                f"{plan['name']} - {plan['price']} ₽{discount_text}", 
                 callback_data=f"buy_{plan_id}"
             )])
+        
         keyboard.append([InlineKeyboardButton("↩️ Назад", callback_data="back_to_main")])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         
+        # Формируем текст с описанием тарифов из конфигурации
+        plans_text = "📱 <b>Выберите тарифный план:</b>\n\n"
+        
+        # Добавляем описание каждого тарифа кроме тестового
+        regular_plans = {k: v for k, v in VPN_PLANS.items() if k != "test"}
+        for plan_id, plan in regular_plans.items():
+            discount = f" (скидка {plan.get('discount')})" if plan.get('discount') else ""
+            plans_text += (
+                f"🔹 <b>{plan['name']}</b>{discount}: {plan['price']} ₽\n"
+                f"   └ {plan['duration']} дней, до {plan.get('devices', 1)} устройств\n"
+            )
+        
         await query.edit_message_text(
-            "📱 Выберите тарифный план:\n\n"
-            "🔹 <b>Базовый</b>: 10 ГБ на 30 дней - 299 ₽\n"
-            "🔹 <b>Стандартный</b>: 50 ГБ на 30 дней - 599 ₽\n"
-            "🔹 <b>Премиум</b>: 100 ГБ на 30 дней - 999 ₽",
+            plans_text,
             reply_markup=reply_markup,
             parse_mode="HTML"
         )

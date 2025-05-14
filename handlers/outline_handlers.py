@@ -781,10 +781,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"Пробный доступ ко всем функциям VPN. По истечении тестового периода требуется оплата.\n\n"
             )
         
-        # Add regular plans
+        # Add regular plans in order of duration (shortest to longest)
         regular_plans = {k: v for k, v in VPN_PLANS.items() if k != "test"}
         
-        for plan_id, plan in regular_plans.items():
+        # Sort by duration
+        sorted_plans = sorted(regular_plans.items(), key=lambda x: x[1]['duration'])
+        
+        for plan_id, plan in sorted_plans:
             discount = f" (скидка {plan.get('discount')})" if plan.get('discount') else ""
             message += (
                 f"*{plan['name']}*{discount}\n"
