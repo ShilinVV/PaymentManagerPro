@@ -45,7 +45,15 @@ async def create_vpn_access(user_id, subscription_id, plan_id, days, name=None):
     outline_key = await outline_service.create_key_with_expiration(days, name)
     
     if not outline_key:
+        logging.error(f"Failed to create Outline key for user {user_id}")
         return None
+    
+    # Проверка типов данных и преобразование при необходимости
+    if isinstance(subscription_id, str) and subscription_id.isdigit():
+        # Преобразуем subscription_id в число, если это строка с цифрами
+        subscription_id = int(subscription_id)
+    
+    logging.info(f"Creating VPN access key for user_id={user_id}, subscription_id={subscription_id}")
     
     # Save key to database
     key_data = {
@@ -58,6 +66,11 @@ async def create_vpn_access(user_id, subscription_id, plan_id, days, name=None):
     }
     
     new_key = await create_access_key(key_data)
+    if not new_key:
+        logging.error(f"Failed to save access key in database for user {user_id}")
+    else:
+        logging.info(f"Successfully created VPN access key: {new_key.key_id} for user {user_id}")
+    
     return new_key
     
 async def extend_vpn_access(key_id, user_id, subscription_id, plan_id, days, name=None):
@@ -78,6 +91,13 @@ async def extend_vpn_access(key_id, user_id, subscription_id, plan_id, days, nam
     # Calculate new expiry date
     expires_at = calculate_expiry(days)
     
+    # Проверка типов данных и преобразование при необходимости
+    if isinstance(subscription_id, str) and subscription_id.isdigit():
+        # Преобразуем subscription_id в число, если это строка с цифрами
+        subscription_id = int(subscription_id)
+    
+    logging.info(f"Extending VPN access key {key_id} for user_id={user_id}, subscription_id={subscription_id}")
+    
     # Update key in database
     update_data = {
         "subscription_id": subscription_id,
@@ -86,7 +106,13 @@ async def extend_vpn_access(key_id, user_id, subscription_id, plan_id, days, nam
     }
     
     # Update the key and return the updated record
-    await update_access_key(key_id, update_data)
+    success = await update_access_key(key_id, update_data)
+    
+    if not success:
+        logging.error(f"Failed to update key {key_id} with new subscription")
+        return None
+    else:
+        logging.info(f"Successfully extended VPN access key: {key_id}")
     
     # Get the updated key
     updated_key = await get_access_key(key_id)
