@@ -174,7 +174,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if subscription:
         # User has active subscription
         keyboard = [
-            [InlineKeyboardButton("🔑 Мои ключи", callback_data="keys")],
+            [InlineKeyboardButton("🔑 Получить ключ", callback_data="plans")],
             [InlineKeyboardButton("📊 Статус подписки", callback_data="status")],
             [InlineKeyboardButton("📱 Как настроить", callback_data="help")]
         ]
@@ -502,7 +502,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if subscription:
             # User has active subscription
             keyboard = [
-                [InlineKeyboardButton("🔑 Мои ключи", callback_data="keys")],
+                [InlineKeyboardButton("🔑 Получить ключ", callback_data="plans")],
                 [InlineKeyboardButton("📊 Статус подписки", callback_data="status")],
                 [InlineKeyboardButton("📱 Как настроить", callback_data="help")]
             ]
