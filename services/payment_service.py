@@ -45,11 +45,32 @@ async def create_payment(user_id, plan_id, return_url=None):
                 "price_paid": 0.0
             }
             
-            subscription_id = await db.create_subscription(subscription_data)
+            subscription = await db.create_subscription(subscription_data)
+            if not subscription:
+                raise ValueError("Failed to create test subscription record")
+                
+            subscription_id = subscription.subscription_id
             
             # Return dummy payment info
+            test_payment_id = f"test_payment_{str(uuid.uuid4())[:8]}"
+            
+            # Create payment record in database for test plan
+            payment_data = {
+                "payment_id": test_payment_id,
+                "user_id": user_id,
+                "subscription_id": subscription_id,
+                "amount": 0.0,
+                "currency": "RUB",
+                "status": "succeeded",
+                "created_at": datetime.now(),
+                "completed_at": datetime.now()
+            }
+            
+            await db.create_payment(payment_data)
+            
+            # Return payment info
             return {
-                "id": f"test_payment_{str(uuid.uuid4())[:8]}",
+                "id": test_payment_id,
                 "status": "succeeded",
                 "subscription_id": subscription_id,
                 "is_test": True
@@ -69,7 +90,11 @@ async def create_payment(user_id, plan_id, return_url=None):
             "price_paid": 0.0
         }
         
-        subscription_id = await db.create_subscription(subscription_data)
+        subscription = await db.create_subscription(subscription_data)
+        if not subscription:
+            raise ValueError("Failed to create subscription record")
+            
+        subscription_id = subscription.subscription_id
         
         # Set default return_url if not provided
         if not return_url:
