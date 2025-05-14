@@ -275,6 +275,9 @@ async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     elif data == "admin_sync_keys":
         # Синхронизация ключей
         try:
+            # Сначала отвечаем на callback запрос, чтобы избежать timeout
+            await query.answer("Начинаем синхронизацию...")
+            
             # Отображаем сообщение о начале синхронизации
             await query.edit_message_text(
                 "🔄 <b>Синхронизация ключей...</b>\n\n"
@@ -290,16 +293,15 @@ async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             
             # Проверяем результат
             if result:
-                # Синхронизация успешна, получаем обновленную статистику
+                # Синхронизация успешна, показываем сообщение об успехе
                 await query.edit_message_text(
-                    "✅ <b>Синхронизация успешно завершена!</b>\n\n"
-                    "Обновляем статистику...",
+                    "✅ <b>Синхронизация успешно завершена!</b>",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("📊 Обновить статистику", callback_data="admin_stats"),
+                        InlineKeyboardButton("↩️ Назад", callback_data="admin_back")
+                    ]]),
                     parse_mode="HTML"
                 )
-                
-                # Вызываем обработчик статистики через callback_data
-                await query.answer()
-                return await admin_button_handler(update, context)
             else:
                 # Ошибка синхронизации
                 await query.edit_message_text(
@@ -312,13 +314,25 @@ async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                 )
         except Exception as e:
             logger.error(f"Error synchronizing keys: {e}")
-            await query.edit_message_text(
-                f"❌ <b>Ошибка при синхронизации ключей:</b>\n\n{str(e)}",
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("↩️ Назад к статистике", callback_data="admin_stats")
-                ]]),
-                parse_mode="HTML"
-            )
+            try:
+                # Пытаемся отредактировать сообщение
+                await query.edit_message_text(
+                    f"❌ <b>Ошибка при синхронизации ключей:</b>\n\n{str(e)}",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("↩️ Назад к статистике", callback_data="admin_stats")
+                    ]]),
+                    parse_mode="HTML"
+                )
+            except Exception as edit_error:
+                # Если не можем отредактировать сообщение, отправляем новое
+                logger.error(f"Error editing message: {edit_error}")
+                await update.effective_chat.send_message(
+                    f"❌ <b>Ошибка при синхронизации ключей:</b>\n\n{str(e)}",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("↩️ Назад к статистике", callback_data="admin_stats")
+                    ]]),
+                    parse_mode="HTML"
+                )
             
     elif data == "admin_back":
         # Return to admin panel
