@@ -144,6 +144,25 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
         return
+        
+    # Обработка кнопки "Помощь"
+    elif data == "help":
+        with open('help_command.txt', 'r', encoding='utf-8') as file:
+            help_text = file.read()
+        
+        # Создаем клавиатуру с кнопками
+        keyboard = [
+            [InlineKeyboardButton("↩️ Вернуться в главное меню", callback_data="back_to_main")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        # Отправляем сообщение
+        await query.edit_message_text(
+            help_text,
+            reply_markup=reply_markup,
+            parse_mode="HTML"
+        )
+        return
     
     # Обработка кнопки "Скопировать ключ"
     elif data.startswith("copy_key_"):
@@ -257,6 +276,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 status_text = (
                     "✅ <b>Статус подписки:</b>\n\n"
+                    f"🆔 ID пользователя: {user_id}\n"
                     f"🔹 Тариф: <b>{plan['name']}</b>\n"
                     f"⏳ Подписка: активна\n"
                     f"📅 Дата окончания: {expiry_date.strftime('%d.%m.%Y')}\n"
@@ -289,6 +309,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 await query.edit_message_text(
                     "❌ <b>У вас нет активной подписки</b>\n\n"
+                    f"🆔 ID пользователя: {user_id}\n\n"
                     "Для использования VPN сервиса необходимо приобрести подписку "
                     "или активировать пробный период.",
                     reply_markup=reply_markup,
@@ -572,7 +593,14 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with open('help_command.txt', 'r', encoding='utf-8') as file:
         help_text = file.read()
     
+    # Create keyboard with return button
+    keyboard = [
+        [InlineKeyboardButton("↩️ Вернуться в главное меню", callback_data="back_to_main")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
     await update.message.reply_text(
         help_text,
+        reply_markup=reply_markup,
         parse_mode="HTML"
     )
