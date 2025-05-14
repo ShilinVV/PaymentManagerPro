@@ -445,16 +445,35 @@ async def delete_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         # Find user by username
         user = None
         all_users = await get_all_users()
+        
+        # Отправляем сообщение о поиске пользователя
+        status_msg = await update.message.reply_text(
+            f"🔍 Ищем пользователя {username}..."
+        )
+        
         for u in all_users:
-            if u.get("username") == username:
+            # Проверяем тип объекта
+            if hasattr(u, 'username'):
+                if u.username == username:
+                    user = u
+                    break
+            elif u.get("username") == username:
                 user = u
                 break
         
         if not user:
-            await update.message.reply_text(f"❌ Пользователь с именем {username} не найден.")
+            await status_msg.edit_text(f"❌ Пользователь с именем {username} не найден.")
             return
         
-        user_id = user.get("telegram_id")
+        # Получаем telegram_id пользователя
+        if hasattr(user, 'telegram_id'):
+            user_id = user.telegram_id
+        else:
+            user_id = user.get("telegram_id")
+        
+        await status_msg.edit_text(
+            f"✅ Пользователь {username} найден. Получаем информацию о подписках и ключах..."
+        )
         
         # Get all active subscriptions and keys
         subscriptions = await get_user_subscriptions(user_id)
@@ -462,26 +481,56 @@ async def delete_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         
         # Delete all keys in Outline
         deleted_keys = 0
-        for key in access_keys:
-            try:
-                key_id = key.get("key_id")
-                await outline_service.delete_key(key_id)
-                deleted_keys += 1
-            except Exception as e:
-                logger.error(f"Error deleting key {key.get('key_id')} for user {username}: {e}")
+        total_keys = len(access_keys) if access_keys else 0
+        
+        if access_keys:
+            await status_msg.edit_text(
+                f"🗑️ Удаляем ключи доступа пользователя {username}..."
+            )
+            
+            for key in access_keys:
+                try:
+                    # Получаем key_id в зависимости от типа объекта
+                    if hasattr(key, 'key_id'):
+                        key_id = key.key_id
+                    else:
+                        key_id = key.get("key_id")
+                        
+                    await outline_service.delete_key(key_id)
+                    deleted_keys += 1
+                except Exception as e:
+                    logger.error(f"Error deleting key for user {username}: {e}")
         
         # Update user data
-        await update_user(user_id, {"has_active_subscription": False})
+        await status_msg.edit_text(
+            f"💾 Обновляем информацию о пользователе {username}..."
+        )
+        
+        # Обновляем статус подписки пользователя
+        await update_user(user_id, {"is_premium": False})
         
         # Set all subscriptions to inactive
-        for sub in subscriptions:
-            sub_id = sub.get("subscription_id")
-            await update_subscription(sub_id, {"status": "inactive"})
+        sub_count = 0
+        if subscriptions:
+            for sub in subscriptions:
+                try:
+                    # Получаем subscription_id в зависимости от типа объекта
+                    if hasattr(sub, 'subscription_id'):
+                        sub_id = sub.subscription_id
+                    else:
+                        sub_id = sub.get("subscription_id")
+                        
+                    await update_subscription(sub_id, {"status": "inactive"})
+                    sub_count += 1
+                except Exception as e:
+                    logger.error(f"Error updating subscription for user {username}: {e}")
         
-        await update.message.reply_text(
-            f"✅ Пользователь {username} успешно удален.\n"
-            f"- Удалено ключей: {deleted_keys}/{len(access_keys)}\n"
-            f"- Деактивировано подписок: {len(subscriptions)}"
+        # Отправляем сообщение об успешном удалении
+        await status_msg.edit_text(
+            f"✅ Пользователь {username} успешно удален.\n\n"
+            f"📊 Результаты:\n"
+            f"- Удалено ключей: {deleted_keys}/{total_keys}\n"
+            f"- Деактивировано подписок: {sub_count}/{len(subscriptions) if subscriptions else 0}"
         )
     except Exception as e:
         logger.error(f"Error deleting user: {e}")
@@ -501,57 +550,112 @@ async def list_users_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await update.message.reply_text("📊 Пользователи не найдены.")
             return
         
+        # Отправляем сообщение о начале загрузки
+        status_msg = await update.message.reply_text(
+            f"⏳ Загружаем список пользователей...\n"
+            f"Всего пользователей: {len(all_users)}"
+        )
+        
         # Get all keys from Outline API to get usage data
         outline_keys = await outline_service.get_keys()
         
         users_text = "📊 <b>Список пользователей:</b>\n\n"
         
         # Process first 10 users to avoid message too long
-        for user in all_users[:10]:
-            telegram_id = user.get("telegram_id")
-            username = user.get("username", "Unknown")
-            first_name = user.get("first_name", "")
-            has_active = user.get("has_active_subscription", False)
-            
-            status = "✅" if has_active else "❌"
-            display_name = f"{first_name} ({username})" if first_name else username
-            
-            # Get user subscriptions
-            subscriptions = await get_user_subscriptions(telegram_id, status="active")
-            
-            # Get user keys
-            access_keys = await get_user_access_keys(telegram_id)
-            
-            # Calculate traffic usage
-            total_traffic = 0
-            for key in access_keys:
-                key_id = key.get("key_id")
-                # Check if key exists in outline_keys (metrics data)
-                for outline_key in outline_keys.get("keys", []):
-                    if str(outline_key.get("id")) == str(key_id):
-                        # Add usage data
-                        total_traffic += outline_key.get("metrics", {}).get("bytesTransferred", 0)
-            
-            # Format user information
-            users_text += f"👤 <code>{display_name}</code> - {status}\n"
-            users_text += f"📈 Трафик: {format_bytes(total_traffic)}\n"
-            
-            # Show subscription expiry if available
-            if subscriptions:
-                # Get the latest subscription
-                latest_sub = max(subscriptions, key=lambda x: x.get("expires_at", 0))
-                expires_at = latest_sub.get("expires_at", 0)
-                if expires_at:
-                    users_text += f"⏳ До: {format_expiry_date(expires_at)}\n\n"
+        user_count = min(10, len(all_users))
+        for i, user in enumerate(all_users[:user_count]):
+            try:
+                # Получаем данные пользователя - поддержка как объектов SQLAlchemy, так и словарей
+                if hasattr(user, 'telegram_id'):
+                    telegram_id = user.telegram_id
+                    username = user.username or "Unknown"
+                    first_name = user.first_name or ""
+                    has_active = user.is_premium  # предполагаем, что is_premium означает активную подписку
+                else:
+                    telegram_id = user.get("telegram_id")
+                    username = user.get("username", "Unknown")
+                    first_name = user.get("first_name", "")
+                    has_active = user.get("has_active_subscription", False)
+                
+                status = "✅" if has_active else "❌"
+                display_name = f"{first_name} ({username})" if first_name else username
+                
+                # Обновляем статус загрузки
+                if i % 3 == 0:  # каждые 3 пользователя
+                    await status_msg.edit_text(
+                        f"⏳ Загружаем информацию о пользователях... ({i+1}/{user_count})"
+                    )
+                
+                # Get user subscriptions
+                subscriptions = await get_user_subscriptions(telegram_id, status="active")
+                
+                # Get user keys
+                access_keys = await get_user_access_keys(telegram_id)
+                
+                # Calculate traffic usage
+                total_traffic = 0
+                
+                # Проверяем, что access_keys не None
+                if access_keys and outline_keys and "accessKeys" in outline_keys:
+                    for key in access_keys:
+                        # Получаем key_id в зависимости от типа объекта
+                        if hasattr(key, 'key_id'):
+                            key_id = key.key_id
+                        else:
+                            key_id = key.get("key_id")
+                            
+                        # Check if key exists in outline_keys (metrics data)
+                        for outline_key in outline_keys["accessKeys"]:
+                            if str(outline_key["id"]) == str(key_id):
+                                # Add usage data
+                                total_traffic += outline_key.get("metrics", {}).get("bytesTransferred", 0)
+                
+                # Format user information
+                users_text += f"👤 <code>{display_name}</code> - {status}\n"
+                users_text += f"📈 Трафик: {format_bytes(total_traffic)}\n"
+                
+                # Show subscription expiry if available
+                if subscriptions:
+                    try:
+                        # Определяем, как получить expires_at в зависимости от типа объекта
+                        if all(hasattr(sub, 'expires_at') for sub in subscriptions):
+                            # Get the latest subscription
+                            latest_sub = max(subscriptions, key=lambda x: x.expires_at or datetime.min)
+                            expires_at = latest_sub.expires_at
+                        else:
+                            # Get the latest subscription
+                            latest_sub = max(subscriptions, key=lambda x: x.get("expires_at", 0))
+                            expires_at = latest_sub.get("expires_at", 0)
+                            
+                        if expires_at:
+                            # Проверяем, если format_expiry_date определена, используем её, иначе форматируем вручную
+                            try:
+                                from utils.helpers import format_expiry_date
+                                expiry_text = format_expiry_date(expires_at)
+                            except (ImportError, NameError):
+                                # Если функция недоступна, используем базовое форматирование
+                                if isinstance(expires_at, datetime):
+                                    expiry_text = expires_at.strftime("%d.%m.%Y")
+                                else:
+                                    expiry_text = "Unknown"
+                                
+                            users_text += f"⏳ До: {expiry_text}\n\n"
+                        else:
+                            users_text += "\n"
+                    except Exception as e:
+                        logger.error(f"Error formatting subscription expiry: {e}")
+                        users_text += "\n"
                 else:
                     users_text += "\n"
-            else:
-                users_text += "\n"
+            except Exception as e:
+                logger.error(f"Error processing user for list: {e}")
+                users_text += f"⚠️ Ошибка при обработке пользователя\n\n"
         
         if len(all_users) > 10:
             users_text += f"...и еще {len(all_users) - 10} пользователей"
         
-        await update.message.reply_text(users_text, parse_mode="HTML")
+        # Обновляем статусное сообщение с окончательным результатом
+        await status_msg.edit_text(users_text, parse_mode="HTML")
     except Exception as e:
         logger.error(f"Error listing users: {e}")
         await update.message.reply_text(f"❌ Ошибка при получении списка пользователей: {str(e)}")
@@ -583,21 +687,52 @@ async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         sent_count = 0
-        for user in users:
-            telegram_id = user.get("telegram_id")
-            if telegram_id:
-                try:
-                    await context.bot.send_message(
-                        chat_id=telegram_id,
-                        text=f"📢 <b>Объявление:</b>\n\n{message}",
-                        parse_mode="HTML"
-                    )
-                    sent_count += 1
-                except Exception as e:
-                    logger.error(f"Error sending broadcast to {telegram_id}: {e}")
+        failed_count = 0
+        total_users = len(users)
         
-        await update.message.reply_text(
-            f"✅ Сообщение отправлено {sent_count} из {len(users)} пользователей."
+        # Отправляем сообщение о начале рассылки
+        status_msg = await update.message.reply_text(
+            f"📤 Начинаем рассылку сообщения {total_users} пользователям...\n"
+            f"Отправлено: 0 из {total_users}"
+        )
+        
+        for user in users:
+            try:
+                # Получаем telegram_id в зависимости от типа объекта
+                if hasattr(user, 'telegram_id'):
+                    telegram_id = user.telegram_id
+                else:
+                    telegram_id = user.get("telegram_id")
+                
+                if telegram_id:
+                    try:
+                        await context.bot.send_message(
+                            chat_id=telegram_id,
+                            text=f"📢 <b>Объявление:</b>\n\n{message}",
+                            parse_mode="HTML"
+                        )
+                        sent_count += 1
+                        
+                        # Обновляем статус каждые 10 отправленных сообщений
+                        if sent_count % 10 == 0:
+                            await status_msg.edit_text(
+                                f"📤 Рассылка сообщения...\n"
+                                f"Отправлено: {sent_count} из {total_users}"
+                            )
+                    except Exception as e:
+                        logger.error(f"Error sending broadcast to {telegram_id}: {e}")
+                        failed_count += 1
+            except Exception as e:
+                logger.error(f"Error processing user for broadcast: {e}")
+                failed_count += 1
+        
+        # Отправляем итоговое сообщение
+        await status_msg.edit_text(
+            f"✅ Рассылка завершена!\n\n"
+            f"📊 Статистика:\n"
+            f"- Всего пользователей: {total_users}\n"
+            f"- Успешно отправлено: {sent_count}\n"
+            f"- Не удалось отправить: {failed_count}"
         )
     except Exception as e:
         logger.error(f"Error broadcasting: {e}")
