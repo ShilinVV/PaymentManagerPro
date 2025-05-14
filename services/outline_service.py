@@ -205,3 +205,67 @@ class OutlineService:
             key_data["expiresAt"] = expiry_str
         
         return key_data
+        
+    async def extend_key_expiration(self, key_id, days, name=None):
+        """Extend the expiration date of an existing key by updating its name
+        
+        Args:
+            key_id (str): ID of the existing key to extend
+            days (int): Number of days until new expiration
+            name (str, optional): Base name. If None, will try to preserve existing name format
+            
+        Returns:
+            dict: Updated key information with new expiration
+        """
+        try:
+            # Get current key info
+            current_key = await self.get_key(key_id)
+            if "error" in current_key:
+                logging.error(f"Key {key_id} not found for extension")
+                return current_key
+                
+            current_name = current_key.get('name', '')
+            
+            # Extract base name from current format if possible
+            base_name = name
+            if not base_name and current_name:
+                # Try to extract base name from "Name (До: YYYY-MM-DD)"
+                import re
+                match = re.match(r'^(.*?)\s*\(До:', current_name)
+                if match:
+                    base_name = match.group(1).strip()
+                else:
+                    base_name = current_name
+            
+            # Set new expiration date
+            expiry_date = datetime.now() + timedelta(days=days)
+            expiry_str = expiry_date.strftime("%Y-%m-%d")
+            
+            # Create new name with expiration info
+            key_name = f"{base_name or 'VPN'} (До: {expiry_str})"
+            
+            # Update the key name
+            result = await self.rename_key(key_id, key_name)
+            
+            # Add expiration date to returned data
+            if "error" not in result:
+                result["expiresAt"] = expiry_str
+            
+            return result
+        except Exception as e:
+            logging.error(f"Failed to extend key expiration: {e}")
+            return {"error": f"Failed to extend key: {str(e)}"}
+            
+    async def find_user_keys(self, user_id, subscription_id=None):
+        """Find all keys associated with a user
+        
+        Args:
+            user_id: Telegram user ID
+            subscription_id (optional): Filter by subscription ID
+            
+        Returns:
+            list: List of matching keys from database
+        """
+        # Implement this when integrating with database service
+        # This functionality should be implemented in database service
+        return []

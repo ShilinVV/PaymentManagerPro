@@ -356,6 +356,7 @@ async def payment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # Create subscription in database
                 from datetime import datetime, timedelta
                 from utils.helpers import calculate_expiry
+                from handlers.outline_handlers import create_vpn_access, extend_vpn_access, get_user_active_keys
                 
                 # Set subscription period
                 expires_at = calculate_expiry(plan['duration'])
@@ -372,35 +373,66 @@ async def payment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 subscription_id = await create_subscription(subscription_data)
                 
-                # Create VPN access key in Outline
+                # Check if user has active keys we can extend
+                active_keys = await get_user_active_keys(user_id)
                 device_limit = plan.get('devices', 1)
                 
-                # Create keys for the user
-                for i in range(device_limit):
-                    device_name = f"Device {i+1}" if i > 0 else "Main device"
-                    key_name = f"{user.get('username', f'User_{user_id}')} - {device_name}"
+                # If user has existing keys from test period, extend them instead of creating new ones
+                if active_keys and len(active_keys) > 0:
+                    # Extend existing keys up to the device limit
+                    keys_extended = 0
+                    for key in active_keys:
+                        if keys_extended >= device_limit:
+                            break
+                            
+                        # Get base name for the key
+                        device_name = f"Device {keys_extended+1}" if keys_extended > 0 else "Main device"
+                        key_name = f"{user.get('username', f'User_{user_id}')} - {device_name}"
+                        
+                        # Extend this key
+                        updated_key = await extend_vpn_access(
+                            key_id=key.get("key_id"),
+                            user_id=user_id,
+                            subscription_id=str(subscription_id),
+                            plan_id=plan_id,
+                            days=plan['duration'],
+                            name=key_name
+                        )
+                        
+                        if updated_key:
+                            keys_extended += 1
                     
-                    # Create key in Outline
-                    key_data = await outline_service.create_key_with_expiration(
-                        days=plan['duration'],
-                        name=key_name
-                    )
-                    
-                    if key_data:
-                        # Save key to database
-                        key_db = {
-                            "user_id": user_id,
-                            "subscription_id": str(subscription_id),
-                            "key_id": key_data.get("id"),
-                            "name": key_name,
-                            "access_url": key_data.get("accessUrl"),
-                            "created_at": datetime.now(),
-                            "expires_at": expires_at
-                        }
-                        await create_access_key(key_db)
-                    
-                    # Update user in database with subscription status
-                    await update_user(user_id, {"has_active_subscription": True})
+                    # If we need more keys than we extended, create new ones
+                    for i in range(keys_extended, device_limit):
+                        device_name = f"Device {i+1}" if i > 0 else "Main device"
+                        key_name = f"{user.get('username', f'User_{user_id}')} - {device_name}"
+                        
+                        # Create new key
+                        await create_vpn_access(
+                            user_id=user_id,
+                            subscription_id=str(subscription_id),
+                            plan_id=plan_id,
+                            days=plan['duration'],
+                            name=key_name
+                        )
+                
+                else:
+                    # User has no existing keys, create new ones
+                    for i in range(device_limit):
+                        device_name = f"Device {i+1}" if i > 0 else "Main device"
+                        key_name = f"{user.get('username', f'User_{user_id}')} - {device_name}"
+                        
+                        # Create new key
+                        await create_vpn_access(
+                            user_id=user_id,
+                            subscription_id=str(subscription_id),
+                            plan_id=plan_id,
+                            days=plan['duration'],
+                            name=key_name
+                        )
+                
+                # Update user in database with subscription status
+                await update_user(user_id, {"has_active_subscription": True})
                 
                 # Update order status
                 await update_order(ObjectId(order_id), {

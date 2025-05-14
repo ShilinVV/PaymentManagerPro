@@ -59,6 +59,52 @@ async def create_vpn_access(user_id, subscription_id, plan_id, days, name=None):
     
     new_key = await create_access_key(key_data)
     return new_key
+    
+async def extend_vpn_access(key_id, user_id, subscription_id, plan_id, days, name=None):
+    """Extend existing VPN key instead of creating a new one"""
+    # Get access key from database
+    key = await get_access_key(key_id)
+    if not key:
+        logging.error(f"Key {key_id} not found for extension")
+        return None
+    
+    # Extend key with Outline API
+    outline_key = await outline_service.extend_key_expiration(key_id, days, name)
+    
+    if not outline_key or "error" in outline_key:
+        logging.error(f"Failed to extend key {key_id}: {outline_key.get('error', 'Unknown error')}")
+        return None
+    
+    # Calculate new expiry date
+    expires_at = calculate_expiry(days)
+    
+    # Update key in database
+    update_data = {
+        "subscription_id": subscription_id,
+        "updated_at": datetime.now(),
+        "expires_at": expires_at
+    }
+    
+    # Update the key and return the updated record
+    await update_access_key(key_id, update_data)
+    
+    # Get the updated key
+    updated_key = await get_access_key(key_id)
+    return updated_key
+
+async def get_user_active_keys(user_id):
+    """Get all active (non-deleted) keys for a user"""
+    try:
+        # Get all keys for the user
+        all_keys = await get_user_access_keys(user_id)
+        
+        # Filter out deleted keys
+        active_keys = [k for k in all_keys if not k.get("deleted", False)]
+        
+        return active_keys
+    except Exception as e:
+        logging.error(f"Error getting user active keys: {e}")
+        return []
 
 async def check_subscription_expiry():
     """Check for expiring subscriptions and notify users"""
