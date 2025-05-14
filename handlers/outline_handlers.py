@@ -364,6 +364,31 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     data = query.data
     
+    # Обработка кнопки "Скопировать ключ"
+    if data.startswith("copy_key_"):
+        callback_id = data
+        access_url = None
+        
+        # Получаем ключ из контекста, если он там сохранен
+        if hasattr(context, 'user_data') and callback_id in context.user_data:
+            access_url = context.user_data[callback_id]
+        
+        # Если ключ найден, отправляем его отдельным сообщением для копирования
+        if access_url:
+            # Подтверждаем действие кнопки
+            await query.answer("Ключ готов для копирования")
+            
+            # Отправляем ключ в отдельном сообщении для удобного копирования
+            await context.bot.send_message(
+                chat_id=user.id,
+                text=f"`{access_url}`",
+                parse_mode="Markdown"
+            )
+            return
+        else:
+            await query.answer("Ключ не найден. Пожалуйста, получите новый ключ.")
+            return
+    
     # Admin panel button
     if data == "admin":
         # Check if user is admin
@@ -702,12 +727,21 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             access_url = getattr(key, "access_url", "")
         
+        # Генерируем уникальный ID для callback копирования ключа
+        copy_key_callback = f"copy_key_{uuid.uuid4().hex[:8]}"
+        
+        # Сохраняем URL-ключ в контексте, чтобы потом его можно было быстро отправить
+        if not hasattr(context, 'user_data'):
+            context.user_data = {}
+        
+        context.user_data[copy_key_callback] = access_url
+        
         # Send success message with access key
         message = (
             f"*Тестовый период активирован!*\n\n"
             f"Вы получили бесплатный доступ к VPN на {test_plan['duration']} дня.\n\n"
             f"*Ваш ключ доступа:*\n"
-            f"{access_url}\n\n"
+            f"`{access_url}`\n\n"
             f"Используйте этот ключ для подключения к VPN через приложение Outline.\n\n"
             f"*Важно:* По истечении тестового периода ключ будет деактивирован. "
             f"Для продолжения использования необходимо приобрести один из платных тарифов.\n\n"
@@ -715,6 +749,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         
         keyboard = [
+            [InlineKeyboardButton("💾 Скопировать ключ", callback_data=copy_key_callback)],
             [InlineKeyboardButton("💳 Тарифные планы", callback_data="plans")],
             [InlineKeyboardButton("📱 Как подключиться", callback_data="help")],
             [InlineKeyboardButton("↩️ В главное меню", callback_data="back_to_main")]
