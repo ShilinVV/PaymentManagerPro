@@ -281,7 +281,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     
     keyboard = [
-        [InlineKeyboardButton("🔑 Получить ключ", callback_data="plans")],
+        [InlineKeyboardButton("🔑 Получить ключ", callback_data="get_key")],
         [InlineKeyboardButton("🔄 Продлить подписку", callback_data="plans")],
         [InlineKeyboardButton("↩️ В главное меню", callback_data="back_to_main")]
     ]
@@ -481,6 +481,84 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("Ключ не найден. Пожалуйста, получите новый ключ.")
             return
     
+    # Обработка кнопки "Получить ключ"
+    if data == "get_key":
+        try:
+            # Получаем активную подписку пользователя
+            subscription = await get_active_subscription(user.id)
+            
+            # Если нет активной подписки, сообщаем об ошибке
+            if not subscription:
+                await query.edit_message_text(
+                    "❌ У вас нет активной подписки.\n\n"
+                    "Для использования VPN сервиса необходимо приобрести подписку "
+                    "или активировать пробный период.",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("💰 Купить доступ", callback_data="buy"),
+                        InlineKeyboardButton("↩️ В главное меню", callback_data="back_to_main")
+                    ]])
+                )
+                return
+            
+            # Получаем информацию о подписке
+            if isinstance(subscription, dict):
+                # MongoDB возвращает словарь
+                subscription_id = subscription.get("_id")
+                plan_id = subscription.get("plan_id")
+            else:
+                # SQLAlchemy возвращает объект
+                subscription_id = subscription.id
+                plan_id = subscription.plan_id
+            
+            # Получаем план
+            plan = VPN_PLANS.get(plan_id, {"name": "Базовый", "devices": 1, "duration": 30})
+            
+            # Создаем ключ доступа
+            key = await create_vpn_access(
+                user_id=user.id,
+                subscription_id=subscription_id,
+                plan_id=plan_id,
+                days=plan.get("duration", 30),
+                name=f"{plan.get('name', 'VPN')} key"
+            )
+            
+            if key:
+                # Создаем клавиатуру с кнопками для доступа к ключу
+                keyboard = [
+                    [InlineKeyboardButton(f"🔑 Скачать ключ", url=key.access_url)],
+                    [InlineKeyboardButton("↩️ В главное меню", callback_data="back_to_main")]
+                ]
+                
+                await query.edit_message_text(
+                    f"✅ <b>Ключ доступа успешно создан!</b>\n\n"
+                    f"📱 <b>Как использовать:</b>\n"
+                    f"1. Установите приложение <a href='https://getoutline.org/get-started/'>Outline VPN</a>\n"
+                    f"2. Нажмите на кнопку ниже для загрузки ключа\n"
+                    f"3. Установите соединение в приложении\n\n"
+                    f"Ваш ключ также доступен в разделе <b>Личный кабинет</b>.",
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode="HTML",
+                    disable_web_page_preview=True
+                )
+            else:
+                await query.edit_message_text(
+                    "❌ Произошла ошибка при создании ключа доступа.\n"
+                    "Пожалуйста, обратитесь к администратору.",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("↩️ В главное меню", callback_data="back_to_main")
+                    ]])
+                )
+        except Exception as e:
+            logging.error(f"Error creating VPN key: {e}")
+            await query.edit_message_text(
+                "❌ Произошла ошибка при создании ключа доступа.\n"
+                "Пожалуйста, обратитесь к администратору.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("↩️ В главное меню", callback_data="back_to_main")
+                ]])
+            )
+        return
+        
     # Admin panel button
     if data == "admin":
         # Check if user is admin
