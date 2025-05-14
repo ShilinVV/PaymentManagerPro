@@ -30,6 +30,21 @@ async def create_payment(user_id, plan_id, return_url=None):
         plan = VPN_PLANS[plan_id]
         amount = plan.get("price", 0)
         
+        # Check if user exists in the database and create if not
+        user = await db.get_user(user_id)
+        if not user:
+            # Create user in database
+            logger.info(f"User {user_id} not found, creating new user record")
+            user_data = {
+                "telegram_id": user_id,
+                "username": f"user_{user_id}",
+                "created_at": datetime.now(),
+                "is_premium": False
+            }
+            user = await db.create_user(user_data)
+            if not user:
+                raise ValueError(f"Failed to create user record for ID {user_id}")
+        
         # Skip payment flow for test plan (free)
         if plan_id == "test" or amount <= 0:
             logger.info(f"Test plan selected, skipping payment for user {user_id}")
