@@ -35,12 +35,15 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Создаем клавиатуру с кнопками
     keyboard = [
         [
+            InlineKeyboardButton("🔍 Тестовый период", callback_data="buy_test")
+        ],
+        [
             InlineKeyboardButton("💰 Купить доступ", callback_data="buy"), 
-            InlineKeyboardButton("🔄 Статус", callback_data="status")
+            InlineKeyboardButton("👤 Личный кабинет", callback_data="status")
         ],
         [
             InlineKeyboardButton("ℹ️ Информация", callback_data="info"), 
-            InlineKeyboardButton("❓ Помощь", callback_data="help")
+            InlineKeyboardButton("🛠 Сервис", callback_data="help")
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
