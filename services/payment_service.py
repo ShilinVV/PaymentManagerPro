@@ -60,12 +60,15 @@ async def create_payment(user_id, plan_id, return_url=None):
         logger.info(f"Using database user ID: {db_user_id} for subscription")
         
         # Skip payment flow for test plan, free plans, or when troubleshooting
-        if plan_id == "test" or amount <= 0 or is_test:
-            logger.info(f"Test plan selected, skipping payment for user {user_id}")
+        if plan_id == "test" or amount <= 0:
+            logger.info(f"Free plan/test period selected for user {user_id}")
+            
+            # Используем уникальный идентификатор для подписки
+            subscription_external_id = f"test_{str(uuid.uuid4())[:8]}"
             
             # Create subscription in database
             subscription_data = {
-                "subscription_id": f"test_{str(uuid.uuid4())[:8]}",
+                "subscription_id": subscription_external_id,
                 "user_id": db_user_id,  # Use internal DB ID, not Telegram ID
                 "plan_id": plan_id,
                 "status": "active",
@@ -74,13 +77,20 @@ async def create_payment(user_id, plan_id, return_url=None):
                 "price_paid": 0.0
             }
             
+            logger.info(f"Creating free subscription for user_id={db_user_id}, subscription_id={subscription_external_id}")
             subscription = await db.create_subscription(subscription_data)
             if not subscription:
-                raise ValueError("Failed to create test subscription record")
+                logger.error(f"Failed to create subscription record for free plan")
+                raise ValueError("Failed to create subscription record for free plan")
                 
-            subscription_id = subscription.subscription_id
+            # Получаем ID подписки (может отличаться от subscription_id)
+            if hasattr(subscription, 'subscription_id'):
+                subscription_id = subscription.subscription_id
+            else:
+                # В случае с SQLAlchemy может вернуться объект с другим атрибутом
+                subscription_id = subscription_external_id
             
-            # Return dummy payment info
+            # Create a test payment record so we have a consistent database structure
             test_payment_id = f"test_payment_{str(uuid.uuid4())[:8]}"
             
             # Create payment record in database for test plan
@@ -95,7 +105,10 @@ async def create_payment(user_id, plan_id, return_url=None):
                 "completed_at": datetime.now()
             }
             
-            await db.create_payment(payment_data)
+            logger.info(f"Creating payment record for free plan: {test_payment_id}")
+            payment = await db.create_payment(payment_data)
+            if not payment:
+                logger.warning(f"Failed to create payment record for free plan, but subscription was created")
             
             # Return payment info
             return {

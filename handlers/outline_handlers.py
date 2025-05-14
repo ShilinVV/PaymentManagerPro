@@ -41,17 +41,37 @@ async def ensure_user_exists(user):
 
 async def create_vpn_access(user_id, subscription_id, plan_id, days, name=None):
     """Create VPN access key and save to database"""
-    # Create key with Outline API
+    # Проверка типов данных и преобразование subscription_id при необходимости
+    if isinstance(subscription_id, str) and subscription_id.isdigit():
+        # Преобразуем subscription_id в число, если это строка с цифрами
+        subscription_id = int(subscription_id)
+    
+    # Сначала проверяем, есть ли у пользователя уже активные ключи
+    active_keys = await get_user_active_keys(user_id)
+    logging.info(f"Checking existing keys for user {user_id}. Found {len(active_keys)} active keys.")
+    
+    # Если есть активные ключи, используем первый из них вместо создания нового
+    if active_keys:
+        existing_key = active_keys[0]
+        
+        # Получаем key_id в зависимости от типа объекта
+        if isinstance(existing_key, dict):
+            key_id = existing_key.get("key_id")
+        else:
+            key_id = getattr(existing_key, "key_id", None)
+            
+        if key_id:
+            logging.info(f"Re-using existing key {key_id} for user {user_id} instead of creating new one")
+            # Продлеваем существующий ключ
+            return await extend_vpn_access(key_id, user_id, subscription_id, plan_id, days, name)
+    
+    # Если нет активных ключей, создаем новый
+    logging.info(f"No active keys found for user {user_id}, creating new key")
     outline_key = await outline_service.create_key_with_expiration(days, name)
     
     if not outline_key:
         logging.error(f"Failed to create Outline key for user {user_id}")
         return None
-    
-    # Проверка типов данных и преобразование при необходимости
-    if isinstance(subscription_id, str) and subscription_id.isdigit():
-        # Преобразуем subscription_id в число, если это строка с цифрами
-        subscription_id = int(subscription_id)
     
     logging.info(f"Creating VPN access key for user_id={user_id}, subscription_id={subscription_id}")
     
