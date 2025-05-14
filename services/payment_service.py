@@ -2,40 +2,78 @@ import os
 import logging
 import uuid
 import json
-from datetime import datetime
-from bson.objectid import ObjectId
+from datetime import datetime, timedelta
 
 from yookassa import Configuration, Payment
 from yookassa.domain.notification import WebhookNotification
 
 from config import YUKASSA_SHOP_ID, YUKASSA_SECRET_KEY, VPN_PLANS
-from services.database_service import get_payment, update_payment, get_subscription, update_subscription
+import services.database_service_sql as db
 
 logger = logging.getLogger(__name__)
 
 # Initialize YooKassa
 try:
     Configuration.configure(YUKASSA_SHOP_ID, YUKASSA_SECRET_KEY)
+    logger.info(f"YooKassa initialized successfully with shop_id: {YUKASSA_SHOP_ID}")
 except Exception as e:
     logger.error(f"Failed to configure YooKassa: {e}")
 
-async def create_payment(subscription_id, user_id):
+async def create_payment(user_id, plan_id, return_url=None):
     """Create a payment with YooKassa"""
     try:
-        # Get subscription details
-        subscription = await get_subscription(subscription_id)
-        if not subscription:
-            raise ValueError(f"Subscription {subscription_id} not found")
-        
-        plan_id = subscription.get("plan_id")
-        if not plan_id or plan_id not in VPN_PLANS:
+        # Validate plan_id
+        if plan_id not in VPN_PLANS:
             raise ValueError(f"Invalid plan ID: {plan_id}")
         
+        # Get plan details
         plan = VPN_PLANS[plan_id]
-        amount = plan.get("price")
+        amount = plan.get("price", 0)
         
+        # Skip payment flow for test plan (free)
+        if plan_id == "test" or amount <= 0:
+            logger.info(f"Test plan selected, skipping payment for user {user_id}")
+            
+            # Create subscription in database
+            subscription_data = {
+                "subscription_id": f"test_{str(uuid.uuid4())[:8]}",
+                "user_id": user_id,
+                "plan_id": plan_id,
+                "status": "active",
+                "created_at": datetime.now(),
+                "expires_at": datetime.now() + timedelta(days=plan.get("duration", 3)),
+                "price_paid": 0.0
+            }
+            
+            subscription_id = await db.create_subscription(subscription_data)
+            
+            # Return dummy payment info
+            return {
+                "id": f"test_payment_{str(uuid.uuid4())[:8]}",
+                "status": "succeeded",
+                "subscription_id": subscription_id,
+                "is_test": True
+            }
+            
         # Create unique idempotence key
         idempotence_key = str(uuid.uuid4())
+        
+        # Create subscription record first
+        subscription_data = {
+            "subscription_id": str(uuid.uuid4()),
+            "user_id": user_id,
+            "plan_id": plan_id,
+            "status": "pending",
+            "created_at": datetime.now(),
+            "expires_at": None,
+            "price_paid": 0.0
+        }
+        
+        subscription_id = await db.create_subscription(subscription_data)
+        
+        # Set default return_url if not provided
+        if not return_url:
+            return_url = "https://t.me/vpn_outline_manager_bot"  # Replace with your bot's username
         
         # Create payment
         payment = Payment.create({
@@ -48,165 +86,164 @@ async def create_payment(subscription_id, user_id):
             },
             "confirmation": {
                 "type": "redirect",
-                "return_url": "https://t.me/your_bot_username"  # Replace with your bot username
+                "return_url": return_url
             },
-            "description": f"Оплата услуг VPN, тариф {plan.get('name')}",
+            "description": f"Оплата VPN, тариф {plan.get('name')}",
             "metadata": {
                 "subscription_id": str(subscription_id),
-                "user_id": user_id
+                "user_id": str(user_id),
+                "plan_id": plan_id
             }
         }, idempotence_key)
         
         # Create payment record in database
-        from services.database_service import create_payment as db_create_payment
-        
         payment_data = {
             "payment_id": payment.id,
             "user_id": user_id,
             "subscription_id": subscription_id,
-            "amount": amount,
+            "amount": float(amount),
             "currency": "RUB",
             "status": "pending",
-            "idempotence_key": idempotence_key,
-            "created_at": datetime.now(),
-            "updated_at": datetime.now()
+            "created_at": datetime.now()
         }
         
-        await db_create_payment(payment_data)
+        await db.create_payment(payment_data)
         
         # Update subscription with payment ID
-        await update_subscription(subscription_id, {
+        await db.update_subscription(subscription_id, {
             "payment_id": payment.id,
-            "payment_status": "pending"
+            "status": "pending"
         })
         
-        # Return confirmation URL
-        return payment.confirmation.confirmation_url
+        # Return payment info with confirmation URL
+        return {
+            "id": payment.id,
+            "status": payment.status,
+            "confirmation_url": payment.confirmation.confirmation_url,
+            "subscription_id": subscription_id
+        }
     
     except Exception as e:
         logger.error(f"Payment creation error: {e}")
         raise
 
-async def check_payment(order_id):
+async def check_payment_status(payment_id):
     """Check payment status in YooKassa"""
     try:
-        # Special handling for test order IDs
-        if str(order_id).startswith("test_"):
-            logger.info(f"Test payment check for {order_id}")
-            # Always consider test orders as paid
-            return True
+        # Special handling for test payment IDs
+        if str(payment_id).startswith("test_"):
+            logger.info(f"Test payment check for {payment_id}")
+            return "succeeded"
             
-        # Get order details
-        try:
-            order = await get_order(ObjectId(order_id))
-        except Exception as e:
-            logger.error(f"Error getting order: {e}")
-            if not order_id:
-                raise ValueError(f"Invalid order ID: {order_id}")
+        # Get payment from YooKassa
+        payment = Payment.find_one(payment_id)
+        if not payment:
+            logger.error(f"Payment {payment_id} not found in YooKassa")
+            return "not_found"
             
-            # For testing, treat any problematic order_id as successful
-            if isinstance(order_id, str):
-                logger.info(f"Test mode: treating order {order_id} as paid")
-                return True
-            raise
-            
-        if not order:
-            raise ValueError(f"Order {order_id} not found")
-        
-        payment_id = order.get("payment_id")
-        if not payment_id:
-            # For testing, if order exists but no payment_id
-            logger.warning(f"No payment ID for order {order_id}, assuming paid for testing")
-            return True
-        
-        try:
-            # Get payment from YooKassa
-            payment = Payment.find_one(payment_id)
-            
-            if payment.status == "succeeded":
-                # Update order status if payment succeeded
-                await update_order(ObjectId(order_id), {
-                    "status": "paid",
-                    "paid_at": datetime.now()
-                })
-                return True
-        except Exception as e:
-            logger.error(f"Error checking payment with YooKassa: {e}")
-            # For testing, treat connection errors as successful payments
-            logger.warning(f"Test mode: treating order {order_id} as paid despite connection error")
-            return True
-        
-        return False
+        logger.info(f"Payment {payment_id} status: {payment.status}")
+        return payment.status
     
     except Exception as e:
-        logger.error(f"Payment check error: {e}")
-        # Return False instead of raising exception for a more graceful failure
+        logger.error(f"Error checking payment status: {e}")
+        return "error"
+
+async def process_payment(payment_id):
+    """Process a successful payment"""
+    from datetime import timedelta
+    
+    try:
+        # Get payment from database
+        payment = await db.get_payment(payment_id)
+        if not payment:
+            logger.error(f"Payment {payment_id} not found in database")
+            return False
+            
+        # If payment already processed
+        if payment.status == "succeeded":
+            logger.info(f"Payment {payment_id} already processed")
+            return True
+            
+        # Get payment status from YooKassa
+        status = await check_payment_status(payment_id)
+        
+        # For test payments, always succeed
+        if str(payment_id).startswith("test_") or status == "succeeded":
+            # Get subscription
+            subscription = await db.get_subscription(payment.subscription_id)
+            if not subscription:
+                logger.error(f"Subscription {payment.subscription_id} not found")
+                return False
+                
+            # Get plan details
+            plan = VPN_PLANS.get(subscription.plan_id)
+            if not plan:
+                logger.error(f"Plan {subscription.plan_id} not found")
+                return False
+                
+            # Calculate expiry date
+            expires_at = datetime.now() + timedelta(days=plan.get("duration", 30))
+            
+            # Update subscription
+            await db.update_subscription(subscription.subscription_id, {
+                "status": "active",
+                "expires_at": expires_at,
+                "price_paid": float(payment.amount)
+            })
+            
+            # Update payment
+            await db.update_payment(payment_id, {
+                "status": "succeeded",
+                "completed_at": datetime.now()
+            })
+            
+            logger.info(f"Payment {payment_id} processed successfully")
+            return True
+        else:
+            logger.info(f"Payment {payment_id} status is {status}, not processing")
+            return False
+    
+    except Exception as e:
+        logger.error(f"Error processing payment: {e}")
         return False
 
 async def process_webhook(payload):
     """Process YooKassa webhook notification"""
     try:
-        # For direct API webhook
-        if isinstance(payload, dict) and "event" in payload and payload["event"] == "payment.succeeded":
-            payment = payload.get("object", {})
-            # Process direct webhook format
-            if payment.get("status") == "succeeded":
-                metadata = payment.get("metadata", {})
-                if not metadata:
-                    logger.error("No metadata in payment")
-                    return False
-                
-                order_id = metadata.get("order_id")
-                if not order_id:
-                    logger.error("No order_id in metadata")
-                    return False
-                
-                # Handle string order_id that's not a valid ObjectId
-                # For testing we'll just log success without trying to update DB
-                logger.info(f"Payment succeeded for order: {order_id}")
-                
-                # In production, we would update the order:
-                # try:
-                #     await update_order(ObjectId(order_id), {
-                #         "status": "paid",
-                #         "paid_at": datetime.now()
-                #     })
-                # except Exception as e:
-                #     logger.error(f"Failed to update order: {e}")
-                
-                return True
-        else:
-            # Parse standard webhook notification
-            notification_object = WebhookNotification(payload)
-            payment = notification_object.object
+        # Parse standard webhook notification
+        notification_object = WebhookNotification(payload)
+        payment = notification_object.object
+        
+        if payment.status == "succeeded":
+            # Payment successful, process subscription
+            metadata = payment.metadata
+            if not metadata:
+                logger.error("No metadata in payment")
+                return False
             
-            if payment.status == "succeeded":
-                # Payment successful, process order
-                metadata = payment.metadata
-                if not metadata:
-                    logger.error("No metadata in payment")
-                    return False
-                
-                order_id = metadata.get("order_id")
-                if not order_id:
-                    logger.error("No order_id in metadata")
-                    return False
-                
-                # Update order status
-                try:
-                    await update_order(ObjectId(order_id), {
-                        "status": "paid",
-                        "paid_at": datetime.now()
-                    })
-                except Exception as e:
-                    logger.error(f"Failed to update order: {e}")
-                    # Continue processing as success for testing
-                
-                return True
+            subscription_id = metadata.get("subscription_id")
+            if not subscription_id:
+                logger.error("No subscription_id in metadata")
+                return False
+            
+            user_id = metadata.get("user_id")
+            if not user_id:
+                logger.error("No user_id in metadata")
+                return False
+            
+            # Update payment status in database
+            await db.update_payment(payment.id, {
+                "status": "succeeded",
+                "completed_at": datetime.now()
+            })
+            
+            # Process the payment (update subscription, etc.)
+            await process_payment(payment.id)
+            
+            return True
         
         return False
     
     except Exception as e:
         logger.error(f"Webhook processing error: {e}")
-        # Don't raise, just return False to indicate failure
         return False
