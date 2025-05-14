@@ -698,7 +698,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Создаем уникальный ID для подписки
         import uuid
-        subscription_id = str(uuid.uuid4())
+        subscription_external_id = f"test_{str(uuid.uuid4())[:8]}"
         
         # Create subscription
         # Получаем реальный ID пользователя из базы данных
@@ -711,6 +711,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_db_id = getattr(db_user, "id", None)
             
         if not user_db_id:
+            logging.error(f"Failed to get internal user_id for test period. User Telegram ID: {user.id}")
             await query.edit_message_text(
                 "Произошла ошибка при активации тестового периода. Пожалуйста, попробуйте позже.",
                 reply_markup=InlineKeyboardMarkup([[
@@ -721,7 +722,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
         subscription_data = {
             "user_id": user_db_id,  # Используем ID из базы данных, а не из Telegram
-            "subscription_id": subscription_id,
+            "subscription_id": subscription_external_id,
             "plan_id": "test",
             "status": "active",
             "created_at": datetime.now(),
@@ -729,9 +730,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "price_paid": 0
         }
         
+        logging.info(f"Creating test subscription for user_db_id={user_db_id}, subscription_id={subscription_external_id}")
         new_subscription = await create_subscription(subscription_data)
         
         if not new_subscription:
+            logging.error(f"Failed to create subscription for test period. User ID: {user_db_id}")
             await query.edit_message_text(
                 "Произошла ошибка при активации тестового периода. Пожалуйста, попробуйте позже.",
                 reply_markup=InlineKeyboardMarkup([[
@@ -740,13 +743,24 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         
-        # Получаем ID подписки (может быть разный формат в зависимости от типа БД)
+        # Получаем ВНУТРЕННИЙ ID подписки для использования в создании ключа
+        subscription_internal_id = None
         if isinstance(new_subscription, dict):
             # MongoDB возвращает словарь
-            subscription_id = new_subscription.get("_id", subscription_id)
+            subscription_internal_id = new_subscription.get("_id")
         else:
             # SQLAlchemy возвращает объект
-            subscription_id = getattr(new_subscription, "id", subscription_id)
+            subscription_internal_id = getattr(new_subscription, "id", None)
+            
+        if not subscription_internal_id:
+            logging.error(f"Failed to get internal subscription_id for test period. User ID: {user_db_id}")
+            await query.edit_message_text(
+                "Произошла ошибка при активации тестового периода. Пожалуйста, попробуйте позже.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("↩️ В главное меню", callback_data="back_to_main")
+                ]])
+            )
+            return
         
         # Create VPN access key
         # Убедимся, что duration - это число
@@ -754,9 +768,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not isinstance(duration_days, int):
             duration_days = 3  # Значение по умолчанию, если не удалось получить число
             
+        logging.info(f"Creating VPN access key for test period. user_id={user_db_id}, subscription_id={subscription_internal_id}")
         key = await create_vpn_access(
             user_db_id,  # Используем ID из базы данных, а не из Telegram 
-            subscription_id, 
+            subscription_internal_id,  # Важно! Используем ВНУТРЕННИЙ ID подписки
             "test", 
             duration_days, 
             f"Test - {user.first_name}"
@@ -772,7 +787,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         # Mark test period as used
-        await update_user(user.id, {"test_used": True})
+        logging.info(f"Marking test period as used for user {user.id}")
+        result = await update_user(user.id, {"test_used": True})
+        if result:
+            logging.info(f"Successfully marked test period as used for user {user.id}")
+        else:
+            logging.error(f"Failed to mark test period as used for user {user.id}")
         
         # Обновляем пользователя в локальной переменной только если он существует
         if db_user:
