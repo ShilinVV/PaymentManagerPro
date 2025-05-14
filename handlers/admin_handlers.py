@@ -27,7 +27,19 @@ outline_service = OutlineService()
 async def is_admin(update: Update) -> bool:
     """Check if the user is an admin"""
     user_id = update.effective_user.id
-    return user_id in ADMIN_IDS
+    # Конвертируем тип в целое число, если это строка
+    user_id_int = int(user_id) if isinstance(user_id, str) else user_id
+    
+    logging.info(f"Admin check for user {user_id_int}, ADMIN_IDS: {ADMIN_IDS}")
+    
+    is_admin_user = user_id_int in ADMIN_IDS
+    
+    if is_admin_user:
+        logging.info(f"User {user_id_int} IS an admin!")
+    else:
+        logging.info(f"User {user_id_int} is NOT an admin. Admin IDs: {ADMIN_IDS}")
+        
+    return is_admin_user
 
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler for the /admin command"""

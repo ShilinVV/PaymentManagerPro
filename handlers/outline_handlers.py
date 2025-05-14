@@ -538,9 +538,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ]
         
         # Add admin button if user is admin
-        if user.id in ADMIN_IDS:
-            keyboard.append([InlineKeyboardButton("🔐 Админ-панель", callback_data="admin")])
+        logging.info(f"Checking admin status for user_id: {user.id}, ADMIN_IDS: {ADMIN_IDS}")
+        user_id = int(user.id) if isinstance(user.id, str) else user.id
         
+        if user_id in ADMIN_IDS:
+            logging.info(f"User {user_id} IS an admin! Adding admin button.")
+            keyboard.append([InlineKeyboardButton("🔐 Админ-панель", callback_data="admin")])
+        else:
+            logging.info(f"User {user_id} is NOT an admin. Admin IDs: {ADMIN_IDS}")
+            
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await query.edit_message_text(
