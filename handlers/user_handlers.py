@@ -402,10 +402,9 @@ async def payment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
                 return
                 
-            # Для платных тарифов показываем ссылку на оплату
+            # Для платных тарифов показываем ссылку на оплату и информацию
             keyboard = [
                 [InlineKeyboardButton("🔗 Перейти к оплате", url=payment_result['confirmation_url'])],
-                [InlineKeyboardButton("✅ Я оплатил", callback_data=f"check_{payment_result['id']}")],
                 [InlineKeyboardButton("↩️ Отмена", callback_data="back_to_main")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -416,7 +415,9 @@ async def payment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"💰 Сумма: {plan['price']} ₽\n\n"
                 "1️⃣ Нажмите кнопку 'Перейти к оплате'\n"
                 "2️⃣ Оплатите заказ на сайте ЮKassa\n"
-                "3️⃣ После оплаты нажмите 'Я оплатил'",
+                "3️⃣ После успешной оплаты вы получите уведомление\n"
+                "    и ключ будет автоматически активирован\n\n"
+                "ℹ️ Обработка платежа может занять несколько минут.",
                 reply_markup=reply_markup,
                 parse_mode="HTML"
             )

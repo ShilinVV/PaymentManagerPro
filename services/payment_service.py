@@ -283,6 +283,7 @@ async def send_payment_success_notification(user_id, plan_id, payment_id):
     try:
         import telegram
         from config import BOT_TOKEN
+        from handlers.outline_handlers import get_user_active_keys
         
         # Создаем экземпляр бота
         bot = telegram.Bot(token=BOT_TOKEN)
@@ -296,23 +297,60 @@ async def send_payment_success_notification(user_id, plan_id, payment_id):
         # Получаем telegram_id пользователя
         telegram_id = user.telegram_id
         
-        # Отправляем уведомление
+        # Получаем план
+        plan_name = VPN_PLANS.get(plan_id, {}).get('name', 'Неизвестный')
+        plan_duration = VPN_PLANS.get(plan_id, {}).get('duration', 30)
+        
+        # Получаем ключи пользователя
+        active_keys = await get_user_active_keys(telegram_id)
+        keys_count = len(active_keys) if active_keys else 0
+        
+        # Формируем сообщение об успешной оплате
         message = (
             "✅ <b>Платеж успешно обработан!</b>\n\n"
-            f"Ваша подписка на тариф <b>{VPN_PLANS.get(plan_id, {}).get('name', 'Неизвестный')}</b> активирована.\n\n"
-            "Для получения ключей доступа перейдите в раздел /status."
+            f"Ваша подписка на тариф <b>{plan_name}</b> активирована.\n"
+            f"Срок действия подписки: <b>{plan_duration} дней</b>.\n\n"
         )
         
+        # Добавляем информацию о ключах или инструкции
+        if keys_count > 0:
+            message += (
+                f"У вас есть <b>{keys_count}</b> активных ключей доступа.\n\n"
+                "Для управления ключами VPN и получения инструкций по настройке, "
+                "перейдите в раздел /status или выберите соответствующую кнопку в меню."
+            )
+        else:
+            message += (
+                "Для получения ключа доступа к VPN, пожалуйста, "
+                "перейдите в раздел /status и нажмите на кнопку \"Получить ключ\"."
+            )
+        
+        # Создаем клавиатуру с кнопками для быстрого доступа
+        keyboard = [
+            [
+                telegram.InlineKeyboardButton("📊 Статус подписки", callback_data="status"),
+                telegram.InlineKeyboardButton("🔑 Мои ключи", callback_data="my_keys")
+            ],
+            [
+                telegram.InlineKeyboardButton("❓ Инструкции", callback_data="help"),
+                telegram.InlineKeyboardButton("📝 Тарифы", callback_data="plans")
+            ]
+        ]
+        reply_markup = telegram.InlineKeyboardMarkup(keyboard)
+        
+        # Отправляем уведомление с клавиатурой
         await bot.send_message(
             chat_id=telegram_id,
             text=message,
-            parse_mode="HTML"
+            parse_mode="HTML",
+            reply_markup=reply_markup
         )
         
         logger.info(f"Payment success notification sent to user {telegram_id}")
         return True
     except Exception as e:
         logger.error(f"Error sending payment success notification: {e}")
+        logger.exception(e)
         return False
 
 async def process_webhook(payload):
