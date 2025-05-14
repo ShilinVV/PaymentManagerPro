@@ -331,10 +331,28 @@ async def payment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     device_name = f"Device {i+1}" if i > 0 else "Main device"
                     key_name = f"{user.username or f'User_{user_id}'} - {device_name}"
                     
-                    # Создаем ключ доступа
+                    # Получаем объект подписки, чтобы использовать его внутренний ID
+                    subscription = await db.get_subscription(payment_result['subscription_id'])
+                    if not subscription:
+                        logger.error(f"Failed to get subscription with ID {payment_result['subscription_id']}")
+                        continue
+
+                    # Используем внутренний ID подписки (числовой)
+                    db_subscription_id = subscription.id
+                    
+                    # Получаем объект пользователя, чтобы использовать его внутренний ID
+                    db_user = await db.get_user(user_id)
+                    if not db_user:
+                        logger.error(f"Failed to get user with telegram_id {user_id}")
+                        continue
+                        
+                    # Используем внутренний ID пользователя (числовой)
+                    db_user_id = db_user.id
+                    
+                    # Создаем ключ доступа с правильными числовыми ID
                     key = await create_vpn_access(
-                        user_id=user_id,
-                        subscription_id=payment_result['subscription_id'],
+                        user_id=db_user_id,  # Используем внутренний ID пользователя
+                        subscription_id=db_subscription_id,  # Используем внутренний ID подписки
                         plan_id=plan_id,
                         days=plan['duration'],
                         name=key_name
