@@ -5,7 +5,7 @@ import json
 from datetime import datetime, timedelta
 
 from yookassa import Configuration, Payment
-from yookassa.domain.notification import WebhookNotification
+from yookassa.domain.notification import WebhookNotification, WebhookNotificationEventType
 
 from config import YUKASSA_SHOP_ID, YUKASSA_SECRET_KEY, VPN_PLANS
 import services.database_service_sql as db
@@ -265,6 +265,10 @@ async def process_payment(payment_id):
             })
             
             logger.info(f"Payment {payment_id} processed successfully")
+            
+            # Send notification to user about successful payment
+            await send_payment_success_notification(payment.user_id, subscription.plan_id, payment_id)
+            
             return True
         else:
             logger.info(f"Payment {payment_id} status is {status}, not processing")
@@ -274,43 +278,149 @@ async def process_payment(payment_id):
         logger.error(f"Error processing payment: {e}")
         return False
 
+async def send_payment_success_notification(user_id, plan_id, payment_id):
+    """Send notification to user about successful payment"""
+    try:
+        import telegram
+        from config import BOT_TOKEN
+        
+        # Создаем экземпляр бота
+        bot = telegram.Bot(token=BOT_TOKEN)
+        
+        # Получаем пользователя
+        user = await db.get_user(user_id)
+        if not user:
+            logger.error(f"User {user_id} not found")
+            return False
+            
+        # Получаем telegram_id пользователя
+        telegram_id = user.telegram_id
+        
+        # Отправляем уведомление
+        message = (
+            "✅ <b>Платеж успешно обработан!</b>\n\n"
+            f"Ваша подписка на тариф <b>{VPN_PLANS.get(plan_id, {}).get('name', 'Неизвестный')}</b> активирована.\n\n"
+            "Для получения ключей доступа перейдите в раздел /status."
+        )
+        
+        await bot.send_message(
+            chat_id=telegram_id,
+            text=message,
+            parse_mode="HTML"
+        )
+        
+        logger.info(f"Payment success notification sent to user {telegram_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Error sending payment success notification: {e}")
+        return False
+
 async def process_webhook(payload):
     """Process YooKassa webhook notification"""
     try:
-        # Parse standard webhook notification
-        notification_object = WebhookNotification(payload)
-        payment = notification_object.object
+        logger.info("Processing YooKassa webhook")
+        logger.info(f"Webhook data: {payload}")
         
-        if payment.status == "succeeded":
-            # Payment successful, process subscription
-            metadata = payment.metadata
-            if not metadata:
-                logger.error("No metadata in payment")
-                return False
+        # Parse notification
+        notification = WebhookNotification(payload)
+        
+        # Check event type
+        event = notification.event
+        logger.info(f"Event type: {event}")
+        
+        # Handle payment.succeeded event
+        if event == WebhookNotificationEventType.PAYMENT_SUCCEEDED:
+            payment = notification.object
+            payment_id = payment.id
             
-            subscription_id = metadata.get("subscription_id")
-            if not subscription_id:
-                logger.error("No subscription_id in metadata")
-                return False
+            logger.info(f"Payment succeeded: {payment_id}")
             
-            user_id = metadata.get("user_id")
-            if not user_id:
-                logger.error("No user_id in metadata")
+            # Get payment from database
+            db_payment = await db.get_payment(payment_id)
+            if not db_payment:
+                logger.error(f"Payment {payment_id} not found in database")
+                
+                # Check if we have metadata in the payment
+                metadata = payment.metadata or {}
+                user_id = metadata.get("user_id")
+                subscription_id = metadata.get("subscription_id")
+                
+                if user_id and subscription_id:
+                    # Create payment record
+                    await db.create_payment({
+                        "payment_id": payment_id,
+                        "user_id": user_id,
+                        "subscription_id": subscription_id,
+                        "amount": float(payment.amount.value),
+                        "currency": payment.amount.currency,
+                        "status": payment.status,
+                        "created_at": datetime.now()
+                    })
+                    logger.info(f"Created payment record for {payment_id}")
+                else:
+                    logger.error("Cannot process payment without user_id or subscription_id")
+                    return False
+            
+            # Process the payment
+            result = await process_payment(payment_id)
+            
+            if result:
+                logger.info(f"Webhook payment {payment_id} processed successfully")
+                return True
+            else:
+                logger.error(f"Failed to process webhook payment {payment_id}")
                 return False
+        
+        # Handle payment.waiting_for_capture event
+        elif event == WebhookNotificationEventType.PAYMENT_WAITING_FOR_CAPTURE:
+            payment = notification.object
+            payment_id = payment.id
+            
+            logger.info(f"Payment waiting for capture: {payment_id}")
             
             # Update payment status in database
-            await db.update_payment(payment.id, {
-                "status": "succeeded",
-                "completed_at": datetime.now()
-            })
-            
-            # Process the payment (update subscription, etc.)
-            await process_payment(payment.id)
+            db_payment = await db.get_payment(payment_id)
+            if db_payment:
+                await db.update_payment(payment_id, {
+                    "status": "waiting_for_capture"
+                })
+                logger.info(f"Payment {payment_id} marked as waiting_for_capture")
             
             return True
         
-        return False
-    
+        # Handle payment.canceled event
+        elif event == WebhookNotificationEventType.PAYMENT_CANCELED:
+            payment = notification.object
+            payment_id = payment.id
+            
+            logger.info(f"Payment canceled: {payment_id}")
+            
+            # Update payment status in database
+            db_payment = await db.get_payment(payment_id)
+            if db_payment:
+                await db.update_payment(payment_id, {
+                    "status": "canceled",
+                    "completed_at": datetime.now()
+                })
+                
+                # Get subscription for this payment
+                subscription_id = db_payment.subscription_id
+                if subscription_id:
+                    # Update subscription status
+                    await db.update_subscription(subscription_id, {
+                        "status": "canceled"
+                    })
+                    
+                logger.info(f"Payment {payment_id} marked as canceled")
+            
+            return True
+                
+        # Unknown event
+        else:
+            logger.info(f"Ignoring unhandled event type: {event}")
+            return True
+            
     except Exception as e:
-        logger.error(f"Webhook processing error: {e}")
+        logger.error(f"Error processing webhook: {e}")
+        logger.exception(e)
         return False

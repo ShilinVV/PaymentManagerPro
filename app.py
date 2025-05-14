@@ -60,22 +60,50 @@ def api_status():
 
 @app.route('/webhooks/payment', methods=['POST'])
 def payment_webhook():
-    """Webhook for payment notifications"""
+    """Webhook for payment notifications from YooKassa"""
     if request.method == 'POST':
         try:
             # Log payment notification
             logger.info("Payment webhook received")
             logger.info(f"Headers: {request.headers}")
-            logger.info(f"Data: {request.data}")
             
-            # Here would be processing of the payment notification
-            # from services.payment_service import process_webhook
-            # await process_webhook(request.json)
+            # Get webhook data
+            webhook_data = request.json if request.is_json else None
             
-            # For now, just acknowledge receipt
-            return jsonify({"status": "ok"})
+            if not webhook_data:
+                logger.warning("No JSON data in webhook request")
+                webhook_data = request.data
+                logger.info(f"Raw Data: {webhook_data}")
+                
+                # Try to parse JSON from data
+                try:
+                    import json
+                    webhook_data = json.loads(webhook_data)
+                except:
+                    logger.error("Failed to parse JSON from webhook data")
+                    return jsonify({"status": "error", "message": "Invalid data format"}), 400
+            
+            logger.info(f"Webhook data: {webhook_data}")
+            
+            # Process the webhook asynchronously
+            import asyncio
+            from services.payment_service import process_webhook
+            
+            # Run in a new event loop
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            result = loop.run_until_complete(process_webhook(webhook_data))
+            loop.close()
+            
+            if result:
+                return jsonify({"status": "ok"})
+            else:
+                return jsonify({"status": "error", "message": "Failed to process webhook"}), 500
+                
         except Exception as e:
             logger.error(f"Error processing payment webhook: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return jsonify({"status": "error", "message": str(e)}), 500
     else:
         return jsonify({"status": "error", "message": "Method not allowed"}), 405
