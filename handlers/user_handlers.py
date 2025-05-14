@@ -60,6 +60,31 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
+    # Обработка кнопки "Скопировать ключ"
+    if query.data.startswith("copy_key_"):
+        callback_id = query.data
+        access_url = None
+        
+        # Получаем ключ из контекста, если он там сохранен
+        if hasattr(context, 'user_data') and callback_id in context.user_data:
+            access_url = context.user_data[callback_id]
+        
+        # Если ключ найден, отправляем его отдельным сообщением для копирования
+        if access_url:
+            # Подтверждаем действие кнопки
+            await query.answer("Ключ готов для копирования")
+            
+            # Отправляем ключ в отдельном сообщении для удобного копирования
+            await context.bot.send_message(
+                chat_id=query.from_user.id,
+                text=f"`{access_url}`",
+                parse_mode="Markdown"
+            )
+            return
+        else:
+            await query.answer("Ключ не найден. Пожалуйста, получите новый ключ.")
+            return
+    
     if query.data == "buy":
         # Show available plans
         keyboard = []
@@ -142,19 +167,37 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 message_text += f"📈 Использовано трафика: {used}\n"
                 message_text += f"⏳ Действует до: {expiry}\n\n"
                 
+                # Создаем клавиатуру с основными кнопками
+                keyboard = [
+                    [InlineKeyboardButton("🔄 Обновить", callback_data="status")],
+                    [InlineKeyboardButton("💰 Продлить доступ", callback_data="buy")]
+                ]
+                
                 # Add config links if there are any keys
                 if access_keys:
                     message_text += "🔐 <b>Ваши ключи доступа:</b>\n\n"
+                    
+                    # Сохраняем ключи в контексте для возможности копирования
+                    if not hasattr(context, 'user_data'):
+                        context.user_data = {}
+                        
                     for i, key in enumerate(access_keys[:2], 1):  # Limit to 2 keys to avoid message too long
                         key_name = key.get("name", f"Ключ {i}")
+                        access_url = key.get('access_url')
                         message_text += f"{i}. <b>{key_name}</b>:\n"
-                        message_text += f"<code>{key.get('access_url')}</code>\n\n"
+                        message_text += f"<code>{access_url}</code>\n\n"
+                        
+                        # Создаем уникальный идентификатор для коллбэка копирования
+                        copy_key_callback = f"copy_key_{uuid.uuid4().hex[:8]}"
+                        context.user_data[copy_key_callback] = access_url
+                        
+                        # Добавляем кнопку копирования для каждого ключа
+                        keyboard.append([
+                            InlineKeyboardButton(f"💾 Скопировать ключ {i}", callback_data=copy_key_callback)
+                        ])
                 
-                keyboard = [
-                    [InlineKeyboardButton("🔄 Обновить", callback_data="status")],
-                    [InlineKeyboardButton("💰 Продлить доступ", callback_data="buy")],
-                    [InlineKeyboardButton("↩️ Назад", callback_data="back_to_main")]
-                ]
+                # Добавляем кнопку возврата в главное меню
+                keyboard.append([InlineKeyboardButton("↩️ Назад", callback_data="back_to_main")])
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 
                 await query.edit_message_text(
@@ -457,13 +500,35 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                  f"📱 Устройства: {active_keys_count} из {max_devices}\n" \
                  f"⏳ Действует до: {expiry}\n\n"
         
-        # Добавим ссылки на конфигурацию
+        # Создаем клавиатуру с кнопкой продления и кнопками копирования ключей
+        keyboard = [
+            [InlineKeyboardButton("💰 Продлить доступ", callback_data="buy")]
+        ]
+        
+        # Добавим ссылки на конфигурацию и кнопки для копирования
         if key_urls:
             message += "<b>Ваши ключи доступа:</b>\n"
+            
+            # Сохраняем ключи в контексте для возможности копирования
+            if not hasattr(context, 'user_data'):
+                context.user_data = {}
+                
             for i, url in enumerate(key_urls, 1):
                 message += f"{i}. <code>{url}</code>\n"
+                
+                # Создаем уникальный идентификатор для коллбэка копирования
+                copy_key_callback = f"copy_key_{uuid.uuid4().hex[:8]}"
+                context.user_data[copy_key_callback] = url
+                
+                # Добавляем кнопку копирования для каждого ключа
+                keyboard.append([
+                    InlineKeyboardButton(f"💾 Скопировать ключ {i}", callback_data=copy_key_callback)
+                ])
         else:
             message += "У вас пока нет ключей доступа. Используйте /keys для их создания."
+            
+        # Обновляем клавиатуру с новыми кнопками
+        reply_markup = InlineKeyboardMarkup(keyboard)
             
         await update.message.reply_text(
             message,
