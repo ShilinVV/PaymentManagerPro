@@ -1,26 +1,14 @@
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice
 from telegram.ext import ContextTypes
-from bson import ObjectId
 
 from config import VPN_PLANS, YUKASSA_SHOP_ID
 from services.outline_service import OutlineService
-from services.payment_service import create_payment, check_payment
-from services.database_service import (
-    get_user,
-    create_user,
-    update_user,
-    create_subscription,
-    update_subscription,
-    get_user_subscriptions,
-    get_active_subscription,
-    get_user_access_keys,
-    create_access_key,
-    get_access_key
-)
-from utils.helpers import format_bytes, format_expiry_date
+import services.payment_service as payment_service
+import services.database_service_sql as db
+from utils.helpers import format_bytes, format_expiry_date, calculate_expiry
 
 logger = logging.getLogger(__name__)
 outline_service = OutlineService()
@@ -265,28 +253,37 @@ async def buy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if plan_id in VPN_PLANS:
             plan = VPN_PLANS[plan_id]
             
-            # Create order in database
+            # Get user from database
             user_id = query.from_user.id
-            order_id = await create_order({
-                "telegram_id": user_id,
-                "plan_id": plan_id,
-                "amount": plan["price"],
-                "status": "pending",
-                "created_at": datetime.now()
-            })
+            user = await db.get_user(user_id)
+            
+            # Check if user has already used test plan
+            if plan_id == "test" and user and user.test_used:
+                await query.edit_message_text(
+                    "⚠️ Вы уже использовали тестовый период.\n\n"
+                    "Пожалуйста, выберите другой тарифный план:",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("↩️ Назад к тарифам", callback_data="buy")
+                    ]])
+                )
+                return
+            
+            # Show confirmation before payment
+            devices_text = f"Подключение до {plan.get('devices', 1)} устройств"
+            discount_text = f", скидка {plan.get('discount')}" if plan.get('discount') else ""
             
             keyboard = [
-                [InlineKeyboardButton("💳 Оплатить", callback_data=f"pay_{order_id}")],
+                [InlineKeyboardButton("💳 Перейти к оплате", callback_data=f"pay_{plan_id}")],
                 [InlineKeyboardButton("↩️ Назад", callback_data="buy")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
             await query.edit_message_text(
-                f"📝 <b>Заказ создан</b>\n\n"
+                f"📝 <b>Подтверждение заказа</b>\n\n"
                 f"🔹 Тариф: <b>{plan['name']}</b>\n"
-                f"💾 Трафик: {format_bytes(plan['data_limit'])}\n"
                 f"⏳ Срок действия: {plan['duration']} дней\n"
-                f"💰 Сумма: {plan['price']} ₽\n\n"
+                f"📱 {devices_text}{discount_text}\n"
+                f"💰 Стоимость: {plan['price']} ₽\n\n"
                 f"Для оплаты нажмите кнопку ниже:",
                 reply_markup=reply_markup,
                 parse_mode="HTML"
@@ -302,31 +299,113 @@ async def buy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def payment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler for payment button"""
     query = update.callback_query
-    await query.answer()
     
     data = query.data
     if data.startswith("pay_"):
-        order_id = data.replace("pay_", "")
+        # Отображаем индикатор загрузки
+        await query.answer("Создаём платёж...")
+        
+        plan_id = data.replace("pay_", "")
         user_id = query.from_user.id
         
         try:
-            # Start the payment process with ЮKassa
-            payment_url = await create_payment(order_id, str(user_id))
+            # Получаем план
+            if plan_id not in VPN_PLANS:
+                raise ValueError(f"Invalid plan ID: {plan_id}")
             
+            plan = VPN_PLANS[plan_id]
+            
+            # Создаем платеж в ЮKassa через обновленный сервис
+            payment_result = await payment_service.create_payment(
+                user_id=user_id,
+                plan_id=plan_id,
+                return_url="https://t.me/vpn_outline_manager_bot"
+            )
+            
+            # Сохраняем ID платежа и подписки в контексте для проверки
+            if not hasattr(context, 'user_data'):
+                context.user_data = {}
+            
+            context.user_data['current_payment'] = {
+                'payment_id': payment_result['id'],
+                'subscription_id': payment_result.get('subscription_id'),
+                'plan_id': plan_id
+            }
+            
+            # Проверяем, тестовый ли это платеж
+            if payment_result.get('is_test', False) or plan_id == "test":
+                # Для тестового плана сразу создаем доступ
+                from handlers.outline_handlers import create_vpn_access
+                
+                # Получаем данные пользователя
+                user = await db.get_user(user_id)
+                
+                # Отмечаем, что пользователь использовал тестовый период
+                if not user.test_used and plan_id == "test":
+                    await db.update_user(user_id, {"test_used": True})
+                
+                # Создаем ключи доступа
+                device_limit = plan.get('devices', 1)
+                success_keys = []
+                
+                for i in range(device_limit):
+                    device_name = f"Device {i+1}" if i > 0 else "Main device"
+                    key_name = f"{user.username or f'User_{user_id}'} - {device_name}"
+                    
+                    # Создаем ключ доступа
+                    key = await create_vpn_access(
+                        user_id=user_id,
+                        subscription_id=payment_result['subscription_id'],
+                        plan_id=plan_id,
+                        days=plan['duration'],
+                        name=key_name
+                    )
+                    
+                    if key:
+                        success_keys.append(key)
+                
+                # Показываем результат
+                if success_keys:
+                    await query.edit_message_text(
+                        f"✅ <b>Тестовый доступ активирован!</b>\n\n"
+                        f"⏳ Срок действия: {plan['duration']} дней\n"
+                        f"📱 Создано ключей: {len(success_keys)}\n\n"
+                        f"Используйте команду /status, чтобы получить ваши ключи доступа.",
+                        reply_markup=InlineKeyboardMarkup([[
+                            InlineKeyboardButton("🔑 Посмотреть мои ключи", callback_data="status")
+                        ]]),
+                        parse_mode="HTML"
+                    )
+                else:
+                    await query.edit_message_text(
+                        "❌ Произошла ошибка при создании ключей доступа.\n"
+                        "Пожалуйста, обратитесь к администратору.",
+                        reply_markup=InlineKeyboardMarkup([[
+                            InlineKeyboardButton("↩️ Назад", callback_data="back_to_main")
+                        ]])
+                    )
+                return
+                
+            # Для обычных платежей показываем ссылку на оплату
             keyboard = [
-                [InlineKeyboardButton("🔗 Перейти к оплате", url=payment_url)],
-                [InlineKeyboardButton("✅ Я оплатил", callback_data=f"check_{order_id}")],
+                [InlineKeyboardButton("🔗 Перейти к оплате", url=payment_result['confirmation_url'])],
+                [InlineKeyboardButton("✅ Я оплатил", callback_data=f"check_{payment_result['id']}")],
                 [InlineKeyboardButton("↩️ Отмена", callback_data="back_to_main")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
             await query.edit_message_text(
-                "💳 Для оплаты перейдите по ссылке ниже.\n\n"
-                "После успешной оплаты нажмите 'Я оплатил'.",
-                reply_markup=reply_markup
+                "💳 <b>Оплата тарифа</b>\n\n"
+                f"🔹 Тариф: <b>{plan['name']}</b>\n"
+                f"💰 Сумма: {plan['price']} ₽\n\n"
+                "1️⃣ Нажмите кнопку 'Перейти к оплате'\n"
+                "2️⃣ Оплатите заказ на сайте ЮKassa\n"
+                "3️⃣ После оплаты нажмите 'Я оплатил'",
+                reply_markup=reply_markup,
+                parse_mode="HTML"
             )
         except Exception as e:
-            logger.error(f"Payment error: {e}")
+            logger.error(f"Payment creation error: {e}")
             await query.edit_message_text(
                 "❌ Произошла ошибка при создании платежа.\n"
                 "Попробуйте позже или обратитесь к администратору.",
