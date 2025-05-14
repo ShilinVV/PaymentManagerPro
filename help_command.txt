@@ -1,0 +1,34 @@
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler for the /help command"""
+    user = update.effective_user
+    await ensure_user_exists(user)
+    
+    message = (
+        "*Инструкция по настройке VPN:*\n\n"
+        "1. Скачайте клиент Outline:\n"
+        "• Android: [Google Play](https://play.google.com/store/apps/details?id=org.outline.android.client)\n"
+        "• iOS: [App Store](https://apps.apple.com/us/app/outline-app/id1356177741)\n"
+        "• Windows: [outline.vpn](https://getoutline.org/get-started/#step-3)\n"
+        "• macOS: [outline.vpn](https://getoutline.org/get-started/#step-3)\n"
+        "• Linux: [outline.vpn](https://getoutline.org/get-started/#step-3)\n\n"
+        "2. Получите ключ доступа, выбрав тарифный план.\n\n"
+        "3. Скопируйте полученную ссылку и откройте ее в клиенте Outline.\n\n"
+        "4. Подключитесь к VPN, нажав кнопку 'Подключиться'.\n\n"
+        "*Дополнительная информация:*\n"
+        "• Один ключ можно использовать на нескольких устройствах (в пределах лимита вашего тарифа).\n"
+        "• При возникновении проблем напишите в поддержку.\n"
+    )
+    
+    # Create keyboard
+    keyboard = [
+        [InlineKeyboardButton("↩️ В главное меню", callback_data="back_to_main")]
+    ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(
+        message,
+        reply_markup=reply_markup,
+        parse_mode="Markdown",
+        disable_web_page_preview=True
+    )
