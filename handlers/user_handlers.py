@@ -1,6 +1,7 @@
 import logging
 import uuid
 from datetime import datetime, timedelta
+from time import time
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice
 from telegram.ext import ContextTypes
 
@@ -88,6 +89,95 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Получаем данные из кнопки
     data = query.data
     
+    # Обработка тестового периода - прямой переход к активации
+    if data == "buy_test":
+        # Для тестового периода сразу предоставляем доступ без оплаты
+        if "test" in VPN_PLANS:
+            # Получаем данные из конфигурации
+            plan_id = "test"
+            plan = VPN_PLANS[plan_id]
+            user_id = query.from_user.id
+            
+            # Проверяем, использовал ли пользователь тестовый период ранее
+            user = await db.get_user(user_id)
+            if user and user.test_used:
+                await query.answer("Вы уже использовали тестовый период ранее")
+                
+                # Создаем клавиатуру с кнопками
+                keyboard = [
+                    [InlineKeyboardButton("💰 Купить платный доступ", callback_data="buy")],
+                    [InlineKeyboardButton("↩️ В главное меню", callback_data="back_to_main")]
+                ]
+                
+                await query.edit_message_text(
+                    "⚠️ <b>Тестовый период уже использован</b>\n\n"
+                    "Вы уже активировали бесплатный тестовый период ранее.\n"
+                    "Для продолжения использования сервиса VPN, пожалуйста, выберите один из платных тарифов.",
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode="HTML"
+                )
+                return
+            
+            # Создаем подписку для тестового периода
+            try:
+                # Получаем данные для создания подписки
+                subscription_id = f"test_{user_id}_{int(time())}"
+                
+                # Создаем запись о подписке
+                from handlers.outline_handlers import create_vpn_access, get_user_active_keys
+                
+                # Создаем ключ доступа
+                key = await create_vpn_access(
+                    user_id=user_id,
+                    subscription_id=subscription_id,
+                    plan_id=plan_id,
+                    days=plan["duration"],
+                    name=f"Test {plan['duration']} days"
+                )
+                
+                # Обновляем статус пользователя - тестовый период использован
+                await db.update_user(user_id, {"test_used": True})
+                
+                # Показываем результат
+                if key:
+                    # Создаем клавиатуру с кнопками для доступа к ключу
+                    keyboard = [
+                        [InlineKeyboardButton(f"🔑 Скачать ключ", url=key.access_url)],
+                        [InlineKeyboardButton("↩️ В главное меню", callback_data="back_to_main")]
+                    ]
+                    
+                    await query.edit_message_text(
+                        f"✅ <b>Тестовый доступ активирован!</b>\n\n"
+                        f"⏳ Срок действия: {plan['duration']} дня\n"
+                        f"📱 Подключаемые устройства: {plan.get('devices', 1)}\n\n"
+                        f"ℹ️ <b>Как использовать:</b>\n"
+                        f"1. Установите приложение <a href='https://getoutline.org/get-started/'>Outline VPN</a>\n"
+                        f"2. Нажмите на кнопку ниже для загрузки ключа\n"
+                        f"3. Установите соединение в приложении\n\n"
+                        f"Ваш ключ также будет доступен в разделе <b>Личный кабинет</b>.",
+                        reply_markup=InlineKeyboardMarkup(keyboard),
+                        parse_mode="HTML",
+                        disable_web_page_preview=True
+                    )
+                else:
+                    await query.edit_message_text(
+                        "❌ Произошла ошибка при создании ключа доступа.\n"
+                        "Пожалуйста, обратитесь к администратору.",
+                        reply_markup=InlineKeyboardMarkup([[
+                            InlineKeyboardButton("↩️ В главное меню", callback_data="back_to_main")
+                        ]])
+                    )
+            except Exception as e:
+                logger.error(f"Error creating test period: {e}")
+                await query.edit_message_text(
+                    "❌ Произошла ошибка при активации тестового периода.\n"
+                    "Пожалуйста, попробуйте позже или обратитесь к администратору.",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("↩️ В главное меню", callback_data="back_to_main")
+                    ]])
+                )
+            return
+    
     # Обработка кнопки "Вернуться в главное меню"
     if data == "back_to_main":
         # Создаем клавиатуру с кнопками
@@ -151,7 +241,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
         
-    # Обработка кнопки "Помощь"
+    # Обработка кнопки "Сервис"
     elif data == "help":
         with open('help_command.txt', 'r', encoding='utf-8') as file:
             help_text = file.read()
@@ -212,13 +302,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 callback_data=f"buy_{plan_id}"
             )])
         
-        # Добавляем тестовый тариф в конец списка
-        if "test" in VPN_PLANS:
-            test_plan = VPN_PLANS["test"]
-            keyboard.append([InlineKeyboardButton(
-                f"🔍 {test_plan['name']} ({test_plan['duration']} дня)",
-                callback_data="buy_test"
-            )])
+        # Тестовый тариф теперь выносим в главное меню, так что здесь его не показываем
         
         # Add back button
         keyboard.append([InlineKeyboardButton("↩️ Назад", callback_data="back_to_main")])

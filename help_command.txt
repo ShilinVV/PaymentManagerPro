@@ -4,7 +4,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await ensure_user_exists(user)
     
     message = (
-        "*Инструкция по настройке VPN:*\n\n"
+        "*🛠 Сервисная информация:*\n\n"
         "1. Скачайте клиент Outline:\n"
         "• Android: [Google Play](https://play.google.com/store/apps/details?id=org.outline.android.client)\n"
         "• iOS: [App Store](https://apps.apple.com/us/app/outline-app/id1356177741)\n"
