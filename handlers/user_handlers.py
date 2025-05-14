@@ -282,10 +282,11 @@ async def payment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     if data.startswith("pay_"):
         # Отображаем индикатор загрузки
-        await query.answer("Создаём платёж...")
+        await query.answer("Создаём доступ...")
         
         plan_id = data.replace("pay_", "")
         user_id = query.from_user.id
+        logger.info(f"🔶 PAYMENT HANDLER: Processing payment for user_id={user_id}, plan_id={plan_id}")
         
         try:
             # Получаем план
@@ -293,8 +294,111 @@ async def payment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 raise ValueError(f"Invalid plan ID: {plan_id}")
             
             plan = VPN_PLANS[plan_id]
+            logger.info(f"🔶 PAYMENT HANDLER: Selected plan: {plan['name']}, price: {plan.get('price', 0)}")
             
+            # For testing, process immediately without payment
+            logger.info(f"🔶 PAYMENT HANDLER: TEST MODE - creating direct access")
+            
+            # Get user from database or create
+            logger.info(f"🔶 PAYMENT HANDLER: Getting user from database")
+            user = await db.get_user(user_id)
+            if not user:
+                # Create user
+                logger.info(f"🔶 PAYMENT HANDLER: User not found, creating new user")
+                first_name = query.from_user.first_name or ""
+                last_name = query.from_user.last_name or ""
+                username = query.from_user.username or f"user_{user_id}"
+                
+                user_data = {
+                    "telegram_id": user_id,
+                    "username": username,
+                    "first_name": first_name,
+                    "last_name": last_name,
+                    "created_at": datetime.now()
+                }
+                user = await db.create_user(user_data)
+                if not user:
+                    raise ValueError(f"Failed to create user record for ID {user_id}")
+                logger.info(f"🔶 PAYMENT HANDLER: User created successfully: {user.id}")
+            
+            # Create direct subscription
+            logger.info(f"🔶 PAYMENT HANDLER: Creating subscription")
+            subscription_data = {
+                "subscription_id": f"direct_{str(uuid.uuid4())[:8]}",
+                "user_id": user.id,  # Use internal ID
+                "plan_id": plan_id,
+                "status": "active",
+                "created_at": datetime.now(),
+                "expires_at": datetime.now() + timedelta(days=plan.get("duration", 30)),
+                "price_paid": 0.0  # Free for testing
+            }
+            
+            subscription = await db.create_subscription(subscription_data)
+            if not subscription:
+                raise ValueError("Failed to create subscription record")
+            logger.info(f"🔶 PAYMENT HANDLER: Subscription created successfully: {subscription.id}")
+            
+            # Create VPN keys
+            device_limit = plan.get('devices', 1)
+            success_keys = []
+            
+            for i in range(device_limit):
+                device_name = f"Device {i+1}" if i > 0 else "Main device"
+                key_name = f"{user.username or f'User_{user_id}'} - {device_name}"
+                logger.info(f"🔶 PAYMENT HANDLER: Creating key {i+1}/{device_limit}: {key_name}")
+                
+                # Create access key directly using internal IDs
+                outline_key = await outline_service.create_key_with_expiration(
+                    days=plan['duration'], 
+                    name=key_name
+                )
+                
+                if not outline_key:
+                    logger.error(f"Failed to create outline key for user {user_id}")
+                    continue
+                
+                # Save key to database
+                key_data = {
+                    "key_id": outline_key.get("id"),
+                    "name": key_name,
+                    "access_url": outline_key.get("accessUrl"),
+                    "user_id": user.id,  # Use internal ID
+                    "subscription_id": subscription.id,  # Use internal ID
+                    "created_at": datetime.now()
+                }
+                
+                new_key = await db.create_access_key(key_data)
+                if new_key:
+                    success_keys.append(new_key)
+                    logger.info(f"🔶 PAYMENT HANDLER: Key created successfully: {new_key.id}")
+            
+            # Show result
+            if success_keys:
+                logger.info(f"🔶 PAYMENT HANDLER: Successfully created {len(success_keys)} keys")
+                keyboard = []
+                for key in success_keys:
+                    keyboard.append([InlineKeyboardButton(f"🔑 Скачать ключ: {key.name}", url=key.access_url)])
+                
+                keyboard.append([InlineKeyboardButton("↩️ В главное меню", callback_data="back_to_main")])
+                
+                await query.edit_message_text(
+                    f"✅ <b>Доступ активирован!</b>\n\n"
+                    f"⏳ Срок действия: {plan['duration']} дней\n"
+                    f"📱 Подключаемые устройства: {plan.get('devices', 1)}\n\n"
+                    "ℹ️ <b>Как использовать:</b>\n"
+                    "1. Установите приложение <a href='https://getoutline.org/get-started/'>Outline VPN</a>\n"
+                    "2. Нажмите на кнопку ниже для загрузки ключа\n"
+                    "3. Установите соединение в приложении\n\n"
+                    "Спасибо за использование нашего сервиса!",
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode="HTML",
+                    disable_web_page_preview=True
+                )
+                return
+            
+            # Если продолжить использовать оригинальный код, то вот так:
             # Создаем платеж в ЮKassa через обновленный сервис
+            logger.info(f"🔶 PAYMENT HANDLER: Создаем платеж в ЮKassa для пользователя {user_id}, план {plan_id}")
             payment_result = await payment_service.create_payment(
                 user_id=user_id,
                 plan_id=plan_id,

@@ -96,8 +96,11 @@ async def main():
     # Callback query handlers
     application.add_handler(CallbackQueryHandler(admin_button_handler, pattern="^admin_"))
     application.add_handler(CallbackQueryHandler(buy_handler, pattern="^buy_"))
-    application.add_handler(CallbackQueryHandler(payment_handler, pattern="^(pay_|check_)"))
+    application.add_handler(CallbackQueryHandler(payment_handler, pattern="^pay_"))  # Упрощаем паттерн
     application.add_handler(CallbackQueryHandler(button_handler))
+    
+    # Логируем все обработчики для отладки
+    logger.info("Telegram bot handlers registered successfully")
     
     # Start the Bot
     await application.initialize()

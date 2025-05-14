@@ -98,8 +98,8 @@ async def get_user_active_keys(user_id):
         # Get all keys for the user
         all_keys = await get_user_access_keys(user_id)
         
-        # Filter out deleted keys
-        active_keys = [k for k in all_keys if not k.get("deleted", False)]
+        # Filter out deleted keys (для SQLAlchemy используем прямой доступ к атрибуту)
+        active_keys = [k for k in all_keys if not (getattr(k, 'deleted', False))]
         
         return active_keys
     except Exception as e:
