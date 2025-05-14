@@ -479,15 +479,35 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         # Get plan details
-        plan_id = subscription.get("plan_id")
+        plan_id = ""
+        subscription_id = ""
+        
+        # Обработка разных типов данных в зависимости от используемой БД
+        if isinstance(subscription, dict):
+            # MongoDB
+            plan_id = subscription.get("plan_id", "")
+            subscription_id = subscription.get("_id", "")
+        else:
+            # SQLAlchemy
+            plan_id = getattr(subscription, "plan_id", "")
+            subscription_id = getattr(subscription, "id", "")
+            
         plan = VPN_PLANS.get(plan_id, {})
         
         # Get access keys for this user
-        subscription_id = subscription.get("_id")
         access_keys = await get_user_access_keys(user.id)
         
         # Filter keys for current subscription
-        valid_keys = [key for key in access_keys if str(key.get("subscription_id")) == str(subscription_id)]
+        valid_keys = []
+        for key in access_keys:
+            key_subscription_id = ""
+            if isinstance(key, dict):
+                key_subscription_id = str(key.get("subscription_id", ""))
+            else:
+                key_subscription_id = str(getattr(key, "subscription_id", ""))
+                
+            if key_subscription_id == str(subscription_id):
+                valid_keys.append(key)
         
         # Format expiry date
         expires_at = subscription.get("expires_at")
@@ -627,11 +647,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             subscription_id = getattr(new_subscription, "id", subscription_id)
         
         # Create VPN access key
+        # Убедимся, что duration - это число
+        duration_days = test_plan["duration"]
+        if not isinstance(duration_days, int):
+            duration_days = 3  # Значение по умолчанию, если не удалось получить число
+            
         key = await create_vpn_access(
             user_db_id,  # Используем ID из базы данных, а не из Telegram 
             subscription_id, 
             "test", 
-            test_plan["duration"], 
+            duration_days, 
             f"Test - {user.first_name}"
         )
         
