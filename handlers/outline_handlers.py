@@ -419,7 +419,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             # User hasn't used test period yet
             db_user = await get_user(user.id)
-            test_used = db_user.get("test_used", False) if db_user else False
+            test_used = False
+            if db_user:
+                if isinstance(db_user, dict):
+                    # MongoDB возвращает словарь
+                    test_used = db_user.get("test_used", False)
+                else:
+                    # SQLAlchemy возвращает объект модели
+                    test_used = getattr(db_user, "test_used", False)
             
             if not test_used:
                 keyboard = [
@@ -512,8 +519,20 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Test period
     elif data == "test_period":
-        # Get user and check if test period already used
+        # Make sure user exists in database
         db_user = await get_user(user.id)
+        
+        # Create user if not exists
+        if not db_user:
+            user_data = {
+                "telegram_id": user.id,
+                "username": user.username,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "created_at": datetime.now(),
+                "test_used": False
+            }
+            db_user = await create_user(user_data)
         
         # Обработка результатов из разных баз данных
         test_used = False
@@ -560,8 +579,26 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         subscription_id = str(uuid.uuid4())
         
         # Create subscription
+        # Получаем реальный ID пользователя из базы данных
+        user_db_id = None
+        if isinstance(db_user, dict):
+            # MongoDB
+            user_db_id = db_user.get("_id", user.id)
+        else:
+            # SQLAlchemy
+            user_db_id = getattr(db_user, "id", None)
+            
+        if not user_db_id:
+            await query.edit_message_text(
+                "Произошла ошибка при активации тестового периода. Пожалуйста, попробуйте позже.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("↩️ В главное меню", callback_data="back_to_main")
+                ]])
+            )
+            return
+            
         subscription_data = {
-            "user_id": user.id,
+            "user_id": user_db_id,  # Используем ID из базы данных, а не из Telegram
             "subscription_id": subscription_id,
             "plan_id": "test",
             "status": "active",
@@ -591,7 +628,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Create VPN access key
         key = await create_vpn_access(
-            user.id, 
+            user_db_id,  # Используем ID из базы данных, а не из Telegram 
             subscription_id, 
             "test", 
             test_plan["duration"], 
@@ -609,6 +646,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Mark test period as used
         await update_user(user.id, {"test_used": True})
+        
+        # Обновляем пользователя в локальной переменной
+        if isinstance(db_user, dict):
+            db_user["test_used"] = True
+        else:
+            db_user.test_used = True
         
         # Получаем дату истечения срока действия
         expiry_date = datetime.now() + timedelta(days=test_plan["duration"])
