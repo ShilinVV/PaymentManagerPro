@@ -368,19 +368,31 @@ async def buy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             devices_text = f"Подключение до {plan.get('devices', 1)} устройств"
             discount_text = f", скидка {plan.get('discount')}" if plan.get('discount') else ""
             
-            keyboard = [
-                [InlineKeyboardButton("💳 Перейти к оплате", callback_data=f"pay_{plan_id}")],
-                [InlineKeyboardButton("↩️ Назад", callback_data="buy")]
-            ]
+            # Разные кнопки и тексты для тестового тарифа и платных тарифов
+            if plan_id == "test":
+                keyboard = [
+                    [InlineKeyboardButton("🔑 Получить ключ", callback_data=f"pay_{plan_id}")],
+                    [InlineKeyboardButton("↩️ Назад", callback_data="buy")]
+                ]
+                button_text = "Для получения тестового ключа нажмите кнопку ниже:"
+                title = "📝 <b>Активация тестового периода</b>"
+            else:
+                keyboard = [
+                    [InlineKeyboardButton("💳 Перейти к оплате", callback_data=f"pay_{plan_id}")],
+                    [InlineKeyboardButton("↩️ Назад", callback_data="buy")]
+                ]
+                button_text = "Для оплаты нажмите кнопку ниже:"
+                title = "📝 <b>Подтверждение заказа</b>"
+                
             reply_markup = InlineKeyboardMarkup(keyboard)
             
             await query.edit_message_text(
-                f"📝 <b>Подтверждение заказа</b>\n\n"
+                f"{title}\n\n"
                 f"🔹 Тариф: <b>{plan['name']}</b>\n"
                 f"⏳ Срок действия: {plan['duration']} дней\n"
                 f"📱 {devices_text}{discount_text}\n"
                 f"💰 Стоимость: {plan['price']} ₽\n\n"
-                f"Для оплаты нажмите кнопку ниже:",
+                f"{button_text}",
                 reply_markup=reply_markup,
                 parse_mode="HTML"
             )
