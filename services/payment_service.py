@@ -66,7 +66,7 @@ async def create_payment(user_id, plan_id, return_url=None):
             # Create subscription in database
             subscription_data = {
                 "subscription_id": f"test_{str(uuid.uuid4())[:8]}",
-                "user_id": user_id,
+                "user_id": db_user_id,  # Use internal DB ID, not Telegram ID
                 "plan_id": plan_id,
                 "status": "active",
                 "created_at": datetime.now(),
@@ -86,7 +86,7 @@ async def create_payment(user_id, plan_id, return_url=None):
             # Create payment record in database for test plan
             payment_data = {
                 "payment_id": test_payment_id,
-                "user_id": user_id,
+                "user_id": db_user_id,  # Use internal DB ID, not Telegram ID
                 "subscription_id": subscription_id,
                 "amount": 0.0,
                 "currency": "RUB",
@@ -111,7 +111,7 @@ async def create_payment(user_id, plan_id, return_url=None):
         # Create subscription record first
         subscription_data = {
             "subscription_id": str(uuid.uuid4()),
-            "user_id": user_id,
+            "user_id": db_user_id,  # Use internal DB ID, not Telegram ID
             "plan_id": plan_id,
             "status": "pending",
             "created_at": datetime.now(),
@@ -153,7 +153,7 @@ async def create_payment(user_id, plan_id, return_url=None):
         # Create payment record in database
         payment_data = {
             "payment_id": payment.id,
-            "user_id": user_id,
+            "user_id": db_user_id,  # Use internal DB ID, not Telegram ID
             "subscription_id": subscription_id,
             "amount": float(amount),
             "currency": "RUB",
