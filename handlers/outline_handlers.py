@@ -816,10 +816,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 callback_data="test_period"
             )])
             
+        # Сортируем тарифы по длительности
+        sorted_plans = sorted(regular_plans.items(), key=lambda x: x[1]['duration'])
+        
         # Add regular plans
-        for plan_id, plan in regular_plans.items():
+        for plan_id, plan in sorted_plans:
+            # Добавляем информацию о скидке, если она есть
+            discount_text = f" (-{plan.get('discount')})" if plan.get('discount') else ""
             keyboard.append([InlineKeyboardButton(
-                f"{plan['name']} - {plan['price']} руб.", 
+                f"{plan['name']} - {plan['price']} руб.{discount_text}", 
                 callback_data=f"buy_{plan_id}"
             )])
         
