@@ -67,9 +67,9 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Устанавливаем команды бота в "бургер-меню"
     commands = [
         ("start", "Перезапустить бота"),
-        ("status", "Статус подписки"),
+        ("status", "Личный кабинет"),
         ("plans", "Тарифы"),
-        ("help", "Помощь")
+        ("help", "Сервис")
     ]
     
     try:
@@ -93,12 +93,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Создаем клавиатуру с кнопками
         keyboard = [
             [
+                InlineKeyboardButton("🔍 Тестовый период", callback_data="buy_test")
+            ],
+            [
                 InlineKeyboardButton("💰 Купить доступ", callback_data="buy"), 
-                InlineKeyboardButton("🔄 Статус", callback_data="status")
+                InlineKeyboardButton("👤 Личный кабинет", callback_data="status")
             ],
             [
                 InlineKeyboardButton("ℹ️ Информация", callback_data="info"), 
-                InlineKeyboardButton("❓ Помощь", callback_data="help")
+                InlineKeyboardButton("🛠 Сервис", callback_data="help")
             ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -230,7 +233,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML"
         )
     
-    # Status command - get user's subscription status
+    # Личный кабинет - получить статус подписки пользователя
     elif data == "status":
         user_id = query.from_user.id
         user = await db.get_user(user_id)
@@ -582,13 +585,13 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         })
         logger.info(f"Пользователь зарегистрирован при запросе статуса: {user_id}")
     
-    # Create and trigger the status button handler
-    keyboard = [[InlineKeyboardButton("🔄 Мой статус", callback_data="status")]]
+    # Create and trigger the личный кабинет button handler
+    keyboard = [[InlineKeyboardButton("👤 Личный кабинет", callback_data="status")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     message = await update.message.reply_text(
         f"🆔 Ваш ID: {user_id}\n\n"
-        "📊 Загрузка статуса...",
+        "📊 Загрузка личного кабинета...",
         reply_markup=reply_markup
     )
 
