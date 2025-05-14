@@ -22,6 +22,8 @@ except Exception as e:
 async def create_payment(user_id, plan_id, return_url=None):
     """Create a payment with YooKassa"""
     try:
+        logger.info(f"Starting payment creation for user_id: {user_id}, plan_id: {plan_id}")
+        
         # Validate plan_id
         if plan_id not in VPN_PLANS:
             raise ValueError(f"Invalid plan ID: {plan_id}")
@@ -29,8 +31,14 @@ async def create_payment(user_id, plan_id, return_url=None):
         # Get plan details
         plan = VPN_PLANS[plan_id]
         amount = plan.get("price", 0)
+        logger.info(f"Plan details: {plan['name']}, price: {amount}")
+        
+        # Force test mode for troubleshooting
+        is_test = True
+        logger.info(f"Forcing test mode for troubleshooting")
         
         # Check if user exists in the database and create if not
+        logger.info(f"Checking if user {user_id} exists in database")
         user = await db.get_user(user_id)
         if not user:
             # Create user in database
@@ -43,10 +51,12 @@ async def create_payment(user_id, plan_id, return_url=None):
             }
             user = await db.create_user(user_data)
             if not user:
+                logger.error(f"Failed to create user record for ID {user_id}")
                 raise ValueError(f"Failed to create user record for ID {user_id}")
+            logger.info(f"User created successfully: {user.telegram_id}, database ID: {user.id}")
         
-        # Skip payment flow for test plan (free)
-        if plan_id == "test" or amount <= 0:
+        # Skip payment flow for test plan, free plans, or when troubleshooting
+        if plan_id == "test" or amount <= 0 or is_test:
             logger.info(f"Test plan selected, skipping payment for user {user_id}")
             
             # Create subscription in database
