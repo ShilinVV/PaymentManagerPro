@@ -611,7 +611,20 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "plans":
         message = "*Доступные тарифные планы:*\n\n"
         
-        # Skip test plan in regular plans view
+        # Get test plan
+        test_plan = VPN_PLANS.get("test", {})
+        
+        # Display test plan first (if available)
+        if test_plan:
+            message += (
+                f"*{test_plan.get('name', 'Тестовый период')}*\n"
+                f"Стоимость: *Бесплатно*\n"
+                f"Срок действия: {test_plan.get('duration', 3)} дня\n"
+                f"Устройств: до {test_plan.get('devices', 1)}\n"
+                f"Пробный доступ ко всем функциям VPN. По истечении тестового периода требуется оплата.\n\n"
+            )
+        
+        # Add regular plans
         regular_plans = {k: v for k, v in VPN_PLANS.items() if k != "test"}
         
         for plan_id, plan in regular_plans.items():
@@ -626,6 +639,24 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Create keyboard with plan options
         keyboard = []
+        
+        # Check if user already used test period
+        db_user = await get_user(user.id)
+        test_used = False
+        if db_user:
+            if isinstance(db_user, dict):
+                test_used = db_user.get("test_used", False)
+            else:
+                test_used = getattr(db_user, "test_used", False)
+                
+        # Add test plan button if not used yet
+        if test_plan and not test_used:
+            keyboard.append([InlineKeyboardButton(
+                "🔍 Попробовать бесплатно", 
+                callback_data="test_period"
+            )])
+            
+        # Add regular plans
         for plan_id, plan in regular_plans.items():
             keyboard.append([InlineKeyboardButton(
                 f"{plan['name']} - {plan['price']} руб.", 
@@ -893,12 +924,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"*Ваш ключ доступа:*\n"
             f"{access_url}\n\n"
             f"Используйте этот ключ для подключения к VPN через приложение Outline.\n\n"
-            f"*Важно:* Сохраните этот ключ или нажмите кнопку 'Мои ключи' для доступа к нему позже.\n\n"
+            f"*Важно:* По истечении тестового периода ключ будет деактивирован. "
+            f"Для продолжения использования необходимо приобрести один из платных тарифов.\n\n"
             f"*Срок действия:* до {expiry_str}"
         )
         
         keyboard = [
-            [InlineKeyboardButton("🔑 Мои ключи", callback_data="keys")],
+            [InlineKeyboardButton("💳 Тарифные планы", callback_data="plans")],
             [InlineKeyboardButton("📱 Как подключиться", callback_data="help")],
             [InlineKeyboardButton("↩️ В главное меню", callback_data="back_to_main")]
         ]
