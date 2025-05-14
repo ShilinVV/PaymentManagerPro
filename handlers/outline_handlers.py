@@ -721,12 +721,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ]])
             )
             return
-        
-        # Создаем уникальный ID для подписки
-        import uuid
-        subscription_external_id = f"test_{str(uuid.uuid4())[:8]}"
-        
-        # Create subscription
+            
         # Получаем реальный ID пользователя из базы данных
         user_db_id = None
         if isinstance(db_user, dict):
@@ -745,87 +740,108 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ]])
             )
             return
+        
+        # Используем payment_service для создания "платежа" для тестового периода
+        # Это гарантирует, что у нас будет запись платежа для тестового периода
+        from services.payment_service import create_payment
+        
+        try:
+            # Создать запись о "платеже" для тестового периода
+            logging.info(f"Creating test period payment record for user {user.id}")
+            payment_result = await create_payment(user.id, "test")
             
-        subscription_data = {
-            "user_id": user_db_id,  # Используем ID из базы данных, а не из Telegram
-            "subscription_id": subscription_external_id,
-            "plan_id": "test",
-            "status": "active",
-            "created_at": datetime.now(),
-            "expires_at": datetime.now() + timedelta(days=test_plan["duration"]),
-            "price_paid": 0
-        }
-        
-        logging.info(f"Creating test subscription for user_db_id={user_db_id}, subscription_id={subscription_external_id}")
-        new_subscription = await create_subscription(subscription_data)
-        
-        if not new_subscription:
-            logging.error(f"Failed to create subscription for test period. User ID: {user_db_id}")
-            await query.edit_message_text(
-                "Произошла ошибка при активации тестового периода. Пожалуйста, попробуйте позже.",
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("↩️ В главное меню", callback_data="back_to_main")
-                ]])
-            )
-            return
-        
-        # Получаем ВНУТРЕННИЙ ID подписки для использования в создании ключа
-        subscription_internal_id = None
-        if isinstance(new_subscription, dict):
-            # MongoDB возвращает словарь
-            subscription_internal_id = new_subscription.get("_id")
-        else:
-            # SQLAlchemy возвращает объект
-            subscription_internal_id = getattr(new_subscription, "id", None)
+            if not payment_result:
+                logging.error(f"Failed to create payment record for test period. User ID: {user.id}")
+                await query.edit_message_text(
+                    "Произошла ошибка при активации тестового периода. Пожалуйста, попробуйте позже.",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("↩️ В главное меню", callback_data="back_to_main")
+                    ]])
+                )
+                return
+                
+            subscription_id = payment_result.get('subscription_id')
+            logging.info(f"Test payment created, subscription_id={subscription_id}")
             
-        if not subscription_internal_id:
-            logging.error(f"Failed to get internal subscription_id for test period. User ID: {user_db_id}")
-            await query.edit_message_text(
-                "Произошла ошибка при активации тестового периода. Пожалуйста, попробуйте позже.",
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("↩️ В главное меню", callback_data="back_to_main")
-                ]])
-            )
-            return
-        
-        # Create VPN access key
-        # Убедимся, что duration - это число
-        duration_days = test_plan["duration"]
-        if not isinstance(duration_days, int):
-            duration_days = 3  # Значение по умолчанию, если не удалось получить число
+            # Получаем объект подписки
+            subscription = await get_subscription(subscription_id)
+            if not subscription:
+                logging.error(f"Failed to get subscription with ID {subscription_id}")
+                await query.edit_message_text(
+                    "Произошла ошибка при активации тестового периода. Пожалуйста, попробуйте позже.",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("↩️ В главное меню", callback_data="back_to_main")
+                    ]])
+                )
+                return
             
-        logging.info(f"Creating VPN access key for test period. user_id={user_db_id}, subscription_id={subscription_internal_id}")
-        key = await create_vpn_access(
-            user_db_id,  # Используем ID из базы данных, а не из Telegram 
-            subscription_internal_id,  # Важно! Используем ВНУТРЕННИЙ ID подписки
-            "test", 
-            duration_days, 
-            f"Test - {user.first_name}"
-        )
-        
-        if not key:
-            await query.edit_message_text(
-                "Произошла ошибка при создании ключа доступа. Пожалуйста, попробуйте позже.",
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("↩️ В главное меню", callback_data="back_to_main")
-                ]])
-            )
-            return
-        
-        # Mark test period as used
-        logging.info(f"Marking test period as used for user {user.id}")
-        result = await update_user(user.id, {"test_used": True})
-        if result:
-            logging.info(f"Successfully marked test period as used for user {user.id}")
-        else:
-            logging.error(f"Failed to mark test period as used for user {user.id}")
-        
-        # Обновляем пользователя в локальной переменной только если он существует
-        if db_user:
-            if isinstance(db_user, dict):
-                db_user["test_used"] = True
+            # Получаем внутренний ID подписки
+            subscription_internal_id = None
+            if isinstance(subscription, dict):
+                # MongoDB возвращает словарь
+                subscription_internal_id = subscription.get("_id")
             else:
-                db_user.test_used = True
+                # SQLAlchemy возвращает объект
+                subscription_internal_id = getattr(subscription, "id", None)
+            
+            if not subscription_internal_id:
+                logging.error(f"Failed to get internal subscription_id for test period. User ID: {user.id}")
+                await query.edit_message_text(
+                    "Произошла ошибка при активации тестового периода. Пожалуйста, попробуйте позже.",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("↩️ В главное меню", callback_data="back_to_main")
+                    ]])
+                )
+                return
+            
+            # Create VPN access key
+            # Убедимся, что duration - это число
+            duration_days = test_plan["duration"]
+            if not isinstance(duration_days, int):
+                duration_days = 3  # Значение по умолчанию, если не удалось получить число
+                
+            logging.info(f"Creating VPN access key for test period. user_id={user_db_id}, subscription_id={subscription_internal_id}")
+            key = await create_vpn_access(
+                user_db_id,  # Используем ID из базы данных, а не из Telegram 
+                subscription_internal_id,  # Важно! Используем ВНУТРЕННИЙ ID подписки
+                "test", 
+                duration_days, 
+                f"Test - {user.first_name}"
+            )
+            
+            if not key:
+                await query.edit_message_text(
+                    "Произошла ошибка при создании ключа доступа. Пожалуйста, попробуйте позже.",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("↩️ В главное меню", callback_data="back_to_main")
+                    ]])
+                )
+                return
+            
+            # Mark test period as used
+            logging.info(f"Marking test period as used for user {user.id}")
+            result = await update_user(user.id, {"test_used": True})
+            if result:
+                logging.info(f"Successfully marked test period as used for user {user.id}")
+            else:
+                logging.error(f"Failed to mark test period as used for user {user.id}")
+            
+            # Обновляем пользователя в локальной переменной только если он существует
+            if db_user:
+                if isinstance(db_user, dict):
+                    db_user["test_used"] = True
+                else:
+                    db_user.test_used = True
+                    
+        except Exception as e:
+            logging.error(f"Error processing test period: {e}")
+            await query.edit_message_text(
+                "Произошла ошибка при активации тестового периода. Пожалуйста, попробуйте позже.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("↩️ В главное меню", callback_data="back_to_main")
+                ]])
+            )
+            return
         
         # Получаем дату истечения срока действия
         expiry_date = datetime.now() + timedelta(days=test_plan["duration"])
