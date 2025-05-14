@@ -21,6 +21,7 @@ from handlers.outline_handlers import (
     keys_command,
     check_subscription_expiry
 )
+from services.sync_service import sync_outline_keys, start_sync_scheduler
 from handlers.admin_handlers import (
     admin_command,
     add_user_command,
@@ -98,6 +99,13 @@ async def main():
     await application.updater.start_polling()
     
     logger.info("Bot started and polling for updates...")
+    
+    # Запускаем первичную синхронизацию ключей
+    logger.info("Starting initial key synchronization...")
+    await sync_outline_keys()
+    
+    # Запускаем задачу периодической синхронизации
+    asyncio.create_task(start_sync_scheduler(300))  # Синхронизация каждые 5 минут
     
     # Keep the bot running
     try:
