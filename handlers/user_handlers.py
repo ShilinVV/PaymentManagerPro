@@ -415,22 +415,37 @@ async def payment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
     
     elif data.startswith("check_"):
-        order_id = data.replace("check_", "")
+        payment_id = data.replace("check_", "")
         
         try:
-            # Check payment status
-            is_paid = await check_payment(order_id)
+            # Отображаем индикатор загрузки
+            await query.answer("Проверяем статус платежа...")
             
-            if is_paid:
-                # Process the order
-                user_id = query.from_user.id
-                user = await get_user(user_id)
+            # Проверяем статус платежа
+            payment_status = await payment_service.check_payment_status(payment_id)
+            
+            if payment_status == "succeeded" or payment_status == "waiting_for_capture":
+                # Обрабатываем успешный платеж
+                payment_result = await payment_service.process_payment(payment_id)
                 
-                # Get order details
-                from services.database_service import get_order
-                order = await get_order(ObjectId(order_id))
-                plan_id = order.get("plan_id")
-                plan = VPN_PLANS[plan_id]
+                if payment_result:
+                    # Получаем данные пользователя и платежа
+                    user_id = query.from_user.id
+                    user = await db.get_user(user_id)
+                    payment = await db.get_payment(payment_id)
+                    
+                    if not payment:
+                        raise ValueError(f"Payment {payment_id} not found")
+                    
+                    # Получаем план и подписку
+                    subscription = await db.get_subscription(payment.subscription_id)
+                    if not subscription:
+                        raise ValueError(f"Subscription {payment.subscription_id} not found")
+                        
+                    plan_id = subscription.plan_id
+                    plan = VPN_PLANS.get(plan_id)
+                    if not plan:
+                        raise ValueError(f"Plan {plan_id} not found")
                 
                 # Create subscription in database
                 from datetime import datetime, timedelta
