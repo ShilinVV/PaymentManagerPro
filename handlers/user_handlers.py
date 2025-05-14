@@ -323,6 +323,12 @@ async def payment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             # Create direct subscription
             logger.info(f"🔶 PAYMENT HANDLER: Creating subscription")
+            
+            # Если это тестовый период, отмечаем, что пользователь использовал тестовый период
+            if plan_id == "test" and user:
+                logger.info(f"🔶 PAYMENT HANDLER: Marking test period as used for user {user.id}")
+                await db.update_user(user.telegram_id, {"test_used": True})
+            
             subscription_data = {
                 "subscription_id": f"direct_{str(uuid.uuid4())[:8]}",
                 "user_id": user.id,  # Use internal ID
@@ -367,9 +373,10 @@ async def payment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "name": key_name,
                     "access_url": outline_key.get("accessUrl"),
                     "user_id": user.id,  # Use internal ID
-                    "subscription_id": subscription.id,  # Use internal ID
+                    "subscription_id": subscription.id,  # Use internal subscription.id (int)
                     "created_at": datetime.now()
                 }
+                logger.info(f"🔶 PAYMENT HANDLER: Key data prepared: {key_data}")
                 
                 new_key = await db.create_access_key(key_data)
                 if new_key:
