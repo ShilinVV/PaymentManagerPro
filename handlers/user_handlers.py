@@ -1,4 +1,5 @@
 import logging
+import uuid
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice
 from telegram.ext import ContextTypes
